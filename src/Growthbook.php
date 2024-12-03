@@ -520,10 +520,14 @@ class Growthbook implements LoggerAwareInterface
             try {
                 call_user_func($this->trackingCallback, $exp, $result);
             } catch (\Throwable $e) {
-                $this->log(LogLevel::ERROR, "Error calling the trackingCallback function", [
-                    "experiment" => $exp->key,
-                    "error" => $e
-                ]);
+                if ($this->logger) {
+                    $this->log(LogLevel::ERROR, "Error calling the trackingCallback function", [
+                        "experiment" => $exp->key,
+                        "error" => $e
+                    ]);
+                } else {
+                    throw $e;
+                }
             }
         }
 
