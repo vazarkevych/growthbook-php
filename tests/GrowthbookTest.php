@@ -7,6 +7,13 @@ use Growthbook\FeatureResult;
 use Growthbook\Growthbook;
 use Growthbook\InlineExperiment;
 use PHPUnit\Framework\TestCase;
+use Psr\Http\Client\ClientInterface;
+use Psr\Http\Message\RequestFactoryInterface;
+use Psr\Http\Message\ResponseInterface;
+use Psr\SimpleCache\CacheInterface;
+use React\EventLoop\Factory;
+use React\Http\Browser;
+use React\Promise\Deferred;
 
 final class GrowthbookTest extends TestCase
 {
@@ -453,5 +460,168 @@ final class GrowthbookTest extends TestCase
 
         $exp = new InlineExperiment("test-exp", [0, 1]);
         $gb->runInlineExperiment($exp);
+    }
+    public function testLoadFeaturesStaleWhileRevalidateAsync(): void
+    {
+        // Create a ReactPHP event loop
+        $loop = Factory::create();
+
+        // Simulate cache
+        $cache = $this->createMock(CacheInterface::class);
+
+        // Create stale features with defaultValue = true
+        $staleFeatures = [
+            'feature-stale' => [
+                'defaultValue' => true,
+                'rules' => []
+            ]
+        ];
+        $encoded = json_encode($staleFeatures);
+
+        // Assume the cache key is md5("https://cdn.growthbook.io/api/features/clientKey")
+        // Ensure the real code uses this exact key.
+        $url = "https://cdn.growthbook.io/api/features/clientKey";
+        $cacheKey = md5($url);
+
+        // Cache returns stale features and old timestamp
+        $cache->method('get')->willReturnMap([
+            [$cacheKey, null, $encoded],
+            [$cacheKey.'_time', null, time() - 120],
+        ]);
+
+        // Simulate an asynchronous client
+        $asyncClient = $this->createMock(Browser::class);
+
+        // New features after update:
+        $updatedFeatures = ['feature-stale' => ['defaultValue' => false, 'rules' => []]];
+        $responseBody = json_encode(['features' => $updatedFeatures]);
+
+        $response = $this->createMock(ResponseInterface::class);
+        $response->method('getBody')->willReturn($responseBody);
+
+        $deferred = new Deferred();
+        $deferred->resolve($response);
+
+        $asyncClient->method('get')->willReturn($deferred->promise());
+
+        // Create Growthbook
+        $gb = new Growthbook([
+            'cache' => $cache,
+            'loop' => $loop,
+            'httpClient' => $this->createMock(ClientInterface::class),
+            'requestFactory' => $this->createMock(RequestFactoryInterface::class),
+        ]);
+
+        // Set asyncClient
+        $refProperty = new \ReflectionProperty($gb, 'asyncClient');
+        $refProperty->setAccessible(true);
+        $refProperty->setValue($gb, $asyncClient);
+
+        // Load features
+        $gb->loadFeatures('clientKey', 'https://cdn.growthbook.io', '', [
+            'staleWhileRevalidate' => true
+        ]);
+
+        // Verify features were set
+        // Add a debug assert:
+        $features = $gb->getFeatures();
+        $this->assertArrayHasKey('feature-stale', $features, "Stale feature should be set from cache");
+        $this->assertTrue($features['feature-stale']->defaultValue, "defaultValue should be true for stale feature");
+
+        // Now check isOn()
+        $this->assertTrue($gb->isOn('feature-stale'), "Should return stale cached features immediately");
+
+        // Run event loop for background update
+        $loop->run();
+
+        // After update, features should become false
+        $this->assertFalse($gb->isOn('feature-stale'), "Should have revalidated and updated features in background");
+    }
+
+    public function testLoadFeaturesSkipCacheAsync(): void
+    {
+        $loop = Factory::create();
+
+        $cache = $this->createMock(CacheInterface::class);
+        $cachedFeatures = ['featureA' => ['defaultValue' => true, 'rules' => []]];
+        $encoded = json_encode($cachedFeatures);
+
+        $cache->method('get')->willReturnMap([
+            ['6c9e3071f693aae0dc874ebc8c36bd77', null, $encoded],
+            ['6c9e3071f693aae0dc874ebc8c36bd77_time', null, time()]
+        ]);
+
+        $asyncClient = $this->createMock(Browser::class);
+        $updatedFeatures = ['featureA' => ['defaultValue' => false, 'rules' => []]];
+        $responseBody = json_encode(['features' => $updatedFeatures]);
+        $response = $this->createMock(ResponseInterface::class);
+        $response->method('getBody')->willReturn($responseBody);
+
+        $deferred = new Deferred();
+        $deferred->resolve($response);
+
+        $asyncClient->method('get')->willReturn($deferred->promise());
+
+        $gb = new Growthbook([
+            'cache' => $cache,
+            'loop' => $loop,
+            'httpClient' => $this->createMock(ClientInterface::class),
+            'requestFactory' => $this->createMock(RequestFactoryInterface::class),
+        ]);
+
+        $refProperty = new \ReflectionProperty($gb, 'asyncClient');
+        $refProperty->setAccessible(true);
+        $refProperty->setValue($gb, $asyncClient);
+
+        $gb->loadFeatures('clientKey', 'https://cdn.growthbook.io', '', [
+            'skipCache' => true
+        ]);
+
+        // Before running the loop, features are not loaded from API, so it should be false
+        $this->assertFalse($gb->isOn('featureA'), "Initially no features loaded since async not run");
+
+        $loop->run();
+
+        // After running the event loop, features should be updated from the API
+        $this->assertFalse($gb->isOn('featureA'), "After running event loop, should fetch from API updating feature to false");
+    }
+
+    public function testLoadFeaturesTimeoutAsync(): void
+    {
+        $loop = Factory::create();
+
+        $cache = $this->createMock(CacheInterface::class);
+        $cache->method('get')->willReturn(null);
+
+        $asyncClient = $this->createMock(Browser::class);
+
+        // Simulate a timeout or error when fetching features
+        $deferred = new Deferred();
+        $deferred->reject(new \Exception("Timeout exceeded"));
+
+        $asyncClient->method('get')->willReturn($deferred->promise());
+
+        $gb = new Growthbook([
+            'cache' => $cache,
+            'loop' => $loop,
+            'httpClient' => $this->createMock(ClientInterface::class),
+            'requestFactory' => $this->createMock(RequestFactoryInterface::class),
+        ]);
+
+        $refProperty = new \ReflectionProperty($gb, 'asyncClient');
+        $refProperty->setAccessible(true);
+        $refProperty->setValue($gb, $asyncClient);
+
+        // Set timeout
+        $gb->loadFeatures('clientKey', 'https://cdn.growthbook.io', '', ['timeout' => 1]);
+
+        // Before run(), no features are loaded since nothing is fetched
+        $this->assertNull($gb->getFeature('non-existent')->value, "No features loaded yet");
+
+        // Run event loop - promise will fail
+        $loop->run();
+
+        // Even after run(), update failed due to timeout
+        $this->assertNull($gb->getFeature('non-existent')->value, "No features should be loaded after timeout error");
     }
 }

@@ -2,10 +2,14 @@
 
 namespace Growthbook;
 
+use React\Http\Browser;
 use Http\Discovery\Psr18ClientDiscovery;
 use Http\Discovery\Psr17FactoryDiscovery;
 use Psr\Log\LoggerAwareInterface;
 use Psr\Log\LogLevel;
+use React\EventLoop\Factory as LoopFactory;
+use React\EventLoop\LoopInterface;
+use React\Promise\PromiseInterface;
 
 class Growthbook implements LoggerAwareInterface
 {
@@ -53,19 +57,36 @@ class Growthbook implements LoggerAwareInterface
     private $apiHost = "";
     /** @var string */
     private $clientKey = "";
-    /** @var string */
-    private $decryptionKey = "";
-
     /** @var array<string,ViewedExperiment> */
     private $tracks = [];
+    /** @var LoopInterface */
+    private $loop;
 
-    public static function create(): Growthbook
+    /** @var Browser */
+    private $asyncClient;
+
+    public static function create(array $options = []): Growthbook
     {
-        return new Growthbook();
+        return new Growthbook($options);
     }
 
     /**
-     * @param array{enabled?:bool,logger?:\Psr\Log\LoggerInterface,url?:string,attributes?:array<string,mixed>,features?:array<string,mixed>,forcedVariations?:array<string,int>,qaMode?:bool,trackingCallback?:callable,cache?:\Psr\SimpleCache\CacheInterface,httpClient?:\Psr\Http\Client\ClientInterface,requestFactory?:\Psr\Http\Message\RequestFactoryInterface,decryptionKey?:string,forcedFeatures?:array<string, FeatureResult<mixed>>} $options
+     * @param array{
+     *   enabled?:bool,
+     *   logger?:\Psr\Log\LoggerInterface,
+     *   url?:string,
+     *   attributes?:array<string,mixed>,
+     *   features?:array<string,mixed>,
+     *   forcedVariations?:array<string,int>,
+     *   forcedFeatures?:array<string, FeatureResult<mixed>>,
+     *   qaMode?:bool,
+     *   trackingCallback?:callable,
+     *   cache?:\Psr\SimpleCache\CacheInterface,
+     *   httpClient?:\Psr\Http\Client\ClientInterface,
+     *   requestFactory?:\Psr\Http\Message\RequestFactoryInterface,
+     *   decryptionKey?:string,
+     *   loop?:LoopInterface
+     * } $options
      */
     public function __construct(array $options = [])
     {
@@ -83,13 +104,16 @@ class Growthbook implements LoggerAwareInterface
             "cache",
             "httpClient",
             "requestFactory",
-            "decryptionKey"
+            "decryptionKey",
+            "loop"
         ];
         $unknownOptions = array_diff(array_keys($options), $knownOptions);
         if (count($unknownOptions)) {
             trigger_error('Unknown Config options: ' . implode(", ", $unknownOptions), E_USER_NOTICE);
         }
 
+        $this->loop = $options['loop'] ?? LoopFactory::create();
+        $this->asyncClient = new Browser($this->loop);
         $this->enabled = $options["enabled"] ?? true;
         $this->logger = $options["logger"] ?? null;
         $this->url = $options["url"] ?? $_SERVER['REQUEST_URI'] ?? "";
@@ -770,11 +794,55 @@ class Growthbook implements LoggerAwareInterface
         return $decrypted;
     }
 
-    public function loadFeatures(string $clientKey, string $apiHost = "", string $decryptionKey = ""): void
+    /**
+     * async getting feature from API.
+     * @return PromiseInterface<array>
+     */
+    private function asyncFetchFeatures(string $url, ?int $timeout): PromiseInterface
+    {
+        return $this->asyncClient->get($url)->then(function (\Psr\Http\Message\ResponseInterface $response) use ($url) {
+            $body = (string)$response->getBody();
+            $parsed = json_decode($body, true);
+            if (!$parsed || !is_array($parsed) || !array_key_exists("features", $parsed)) {
+                $this->log(LogLevel::WARNING, "Could not load features", ["url" => $url, "responseBody" => $body]);
+                throw new \Exception("Invalid features response");
+            }
+            $features = array_key_exists("encryptedFeatures", $parsed)
+                ? json_decode($this->decrypt($parsed["encryptedFeatures"]), true)
+                : $parsed["features"];
+            $this->log(LogLevel::INFO, "Load features from URL", ["url" => $url, "numFeatures" => count($features)]);
+            return $features;
+        }, function (\Throwable $e) use ($url) {
+            $this->log(LogLevel::WARNING, "Could not load features", ["url" => $url, "error" => $e->getMessage()]);
+            throw $e;
+        });
+    }
+
+    private function revalidateFeaturesInBackground(string $url, string $cacheKey, ?int $timeout): void
+    {
+        $this->loop->addTimer(0.01, function () use ($url, $cacheKey, $timeout) {
+            $this->asyncFetchFeatures($url, $timeout)->then(function ($features) use ($cacheKey) {
+                $this->withFeatures($features);
+                if ($this->cache) {
+                    $this->cache->set($cacheKey, json_encode($features), $this->cacheTTL);
+                    $this->cache->set($cacheKey . '_time', time(), $this->cacheTTL);
+                    $this->log(LogLevel::INFO, "Cache features (async)", ["numFeatures" => count($features), "ttl" => $this->cacheTTL]);
+                }
+            })->otherwise(function ($e) {
+                $this->log(LogLevel::WARNING, "Background revalidation failed", ["error" => $e->getMessage()]);
+            });
+        });
+    }
+
+    public function loadFeatures(string $clientKey, string $apiHost = "", string $decryptionKey = "", array $options = []): void
     {
         $this->clientKey = $clientKey;
         $this->apiHost = $apiHost;
         $this->decryptionKey = $decryptionKey;
+
+        $timeout = $options['timeout'] ?? null;
+        $skipCache = $options['skipCache'] ?? false;
+        $staleWhileRevalidate = $options['staleWhileRevalidate'] ?? true;
 
         if (!$this->clientKey) {
             throw new \Exception("Must specify a clientKey before loading features.");
@@ -789,16 +857,30 @@ class Growthbook implements LoggerAwareInterface
         // The features URL is also the cache key
         $url = rtrim($this->apiHost ?? self::DEFAULT_API_HOST, "/") . "/api/features/" . $this->clientKey;
         $cacheKey = md5($url);
-
+        $now = time();
         // First try fetching from cache
-        if ($this->cache) {
-            $featuresJSON = $this->cache->get($cacheKey);
-            if ($featuresJSON) {
-                $features = json_decode($featuresJSON, true);
-                if ($features && is_array($features)) {
-                    $this->log(LogLevel::INFO, "Load features from cache", ["url" => $url, "numFeatures" => count($features)]);
-                    $this->withFeatures($features);
-                    return;
+        if ($this->cache && !$skipCache) {
+            $cachedData = $this->cache->get($cacheKey);
+            $cachedTime = $this->cache->get($cacheKey . '_time');
+            if ($cachedData) {
+                $features = json_decode($cachedData, true);
+                if (is_array($features)) {
+                    $age = $cachedTime ? $now - (int)$cachedTime : PHP_INT_MAX;
+                    if ($age < $this->cacheTTL) {
+                        $this->log(LogLevel::INFO, "Load features from cache", ["url" => $url, "numFeatures" => count($features)]);
+                        $this->withFeatures($features);
+                        return;
+                    } else {
+                        // Old data
+                        if ($staleWhileRevalidate) {
+                            $this->log(LogLevel::INFO, "Load stale features from cache and revalidate in background", ["url" => $url, "numFeatures" => count($features)]);
+                            $this->withFeatures($features);
+                            $this->revalidateFeaturesInBackground($url, $cacheKey, $timeout);
+                            return;
+                        } else {
+                            $this->log(LogLevel::INFO, "Cache stale, will fetch new features", ["url" => $url]);
+                        }
+                    }
                 }
             }
         }
@@ -806,7 +888,7 @@ class Growthbook implements LoggerAwareInterface
         // Otherwise, fetch from API
         $req = $this->requestFactory->createRequest('GET', $url);
         $res = $this->httpClient->sendRequest($req);
-        $body = $res->getBody();
+        $body = (string)$res->getBody();
         $parsed = json_decode($body, true);
         if (!$parsed || !is_array($parsed) || !array_key_exists("features", $parsed)) {
             $this->log(LogLevel::WARNING, "Could not load features", ["url" => $url, "responseBody" => $body]);
@@ -822,6 +904,7 @@ class Growthbook implements LoggerAwareInterface
         $this->withFeatures($features);
         if ($this->cache) {
             $this->cache->set($cacheKey, json_encode($features), $this->cacheTTL);
+            $this->cache->set($cacheKey . '_time', time(), $this->cacheTTL);
             $this->log(LogLevel::INFO, "Cache features", ["url" => $url, "numFeatures" => count($features), "ttl" => $this->cacheTTL]);
         }
     }
