@@ -10,6 +10,7 @@ use Psr\Log\LogLevel;
 use React\EventLoop\Factory as LoopFactory;
 use React\EventLoop\LoopInterface;
 use React\Promise\PromiseInterface;
+use function React\Promise\Timer\timeout;
 
 class Growthbook implements LoggerAwareInterface
 {
@@ -473,13 +474,11 @@ class Growthbook implements LoggerAwareInterface
         }
 
         // 7. Filtered out / not in namespace
-        if ($exp->filters) {
-            if ($this->isFilteredOut($exp->filters)) {
-                $this->log(LogLevel::DEBUG, "Skip experiment because of filters (e.g. namespace)", [
-                    "experiment" => $exp->key
-                ]);
-                return new ExperimentResult($exp, $hashValue, -1, false, $featureId);
-            }
+        if ($exp->filters && $this->isFilteredOut($exp->filters)) {
+            $this->log(LogLevel::DEBUG, "Skip experiment: filtered out", [
+                "experiment" => $exp->key
+            ]);
+            return new ExperimentResult($exp, $hashValue, -1, false, $featureId);
         } elseif ($exp->namespace && !static::inNamespace($hashValue, $exp->namespace)) {
             $this->log(LogLevel::DEBUG, "Skip experiment because not in namespace", [
                 "experiment" => $exp->key
@@ -647,27 +646,25 @@ class Growthbook implements LoggerAwareInterface
         foreach ($filters as $filter) {
             $hashValue = $this->getHashValue($filter["attribute"] ?? "id");
             if ($hashValue === "") {
-                return false;
+                continue;
             }
 
             $n = self::hash($filter["seed"] ?? "", $hashValue, $filter["hashVersion"] ?? 2);
             if ($n === null) {
-                return false;
+                continue;
             }
 
-            $filtered = false;
+            $matched = false;
             foreach ($filter["ranges"] as $range) {
                 if (self::inRange($n, $range)) {
-                    $filtered = true;
+                    $matched = true;
                     break;
                 }
             }
-            if (!$filtered) {
-                return true;
-            }
+                return !$matched;
         }
 
-        return false;
+        return true;
     }
 
     /**
@@ -800,7 +797,13 @@ class Growthbook implements LoggerAwareInterface
      */
     private function asyncFetchFeatures(string $url, ?int $timeout): PromiseInterface
     {
-        return $this->asyncClient->get($url)->then(function (\Psr\Http\Message\ResponseInterface $response) use ($url) {
+        $request = $this->asyncClient->get($url);
+        // // If a timeout is specified, wrap the request in timeout()
+        if ($timeout !== null && $timeout > 0) {
+            $request = timeout($request, $timeout, $this->loop);
+        }
+
+        return $request->then(function (\Psr\Http\Message\ResponseInterface $response) use ($url) {
             $body = (string)$response->getBody();
             $parsed = json_decode($body, true);
             if (!$parsed || !is_array($parsed) || !array_key_exists("features", $parsed)) {
