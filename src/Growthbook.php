@@ -68,6 +68,11 @@ class Growthbook implements LoggerAwareInterface
     /** @var Browser */
     private $asyncClient;
 
+    /**
+     * Creates an instance of Growthbook.
+     * @param array<string,mixed> $options
+     * @return Growthbook
+     */
     public static function create(array $options = []): Growthbook
     {
         return new Growthbook($options);
@@ -802,7 +807,9 @@ class Growthbook implements LoggerAwareInterface
 
     /**
      * async getting feature from API.
-     * @return PromiseInterface<array>
+     * @param string $url
+     * @param int|null $timeout
+     * @return PromiseInterface<array<string,mixed>>
      */
     private function asyncFetchFeatures(string $url, ?int $timeout): PromiseInterface
     {
@@ -846,6 +853,13 @@ class Growthbook implements LoggerAwareInterface
         });
     }
 
+    /**
+     * Loads features from the API
+     * @param string $clientKey
+     * @param string $apiHost
+     * @param string $decryptionKey
+     * @param array<string,mixed> $options
+     */
     public function loadFeatures(string $clientKey, string $apiHost = "", string $decryptionKey = "", array $options = []): void
     {
         $this->clientKey = $clientKey;
