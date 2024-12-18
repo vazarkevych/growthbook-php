@@ -874,10 +874,10 @@ class Growthbook implements LoggerAwareInterface
             throw new \Exception("Must specify a clientKey before loading features.");
         }
         if (!$this->httpClient) {
-            throw new \Exception("Must set an HTTP Client before loading features.");
+            throw new \RuntimeException("Must set an HTTP Client before loading features.");
         }
         if (!$this->requestFactory) {
-            throw new \Exception("Must set an HTTP Request Factory before loading features");
+            throw new \RuntimeException("Must set an HTTP Request Factory before loading features");
         }
 
         // The features URL is also the cache key
