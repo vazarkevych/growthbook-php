@@ -646,12 +646,12 @@ class Growthbook implements LoggerAwareInterface
         foreach ($filters as $filter) {
             $hashValue = $this->getHashValue($filter["attribute"] ?? "id");
             if ($hashValue === "") {
-                continue;
+                continue; // Skip if hash value is empty
             }
 
             $n = self::hash($filter["seed"] ?? "", $hashValue, $filter["hashVersion"] ?? 2);
             if ($n === null) {
-                continue;
+                continue; // Skip if hash computation fails
             }
 
             $matched = false;
@@ -661,10 +661,13 @@ class Growthbook implements LoggerAwareInterface
                     break;
                 }
             }
-                return !$matched;
+
+            if (!$matched) {
+                return true; // Filter out if no range matches
+            }
         }
 
-        return true;
+        return false; // All filters passed
     }
 
     /**
