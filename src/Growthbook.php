@@ -58,6 +58,8 @@ class Growthbook implements LoggerAwareInterface
     private $apiHost = "";
     /** @var string */
     private $clientKey = "";
+    /** @var string|null */
+    private $decryptionKey;
     /** @var array<string,ViewedExperiment> */
     private $tracks = [];
     /** @var LoopInterface */
