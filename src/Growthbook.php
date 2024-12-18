@@ -479,10 +479,11 @@ class Growthbook implements LoggerAwareInterface
                 "experiment" => $exp->key
             ]);
             return new ExperimentResult($exp, $hashValue, -1, false, $featureId);
-        } elseif ($exp->namespace && !static::inNamespace($hashValue, $exp->namespace)) {
-            $this->log(LogLevel::DEBUG, "Skip experiment because not in namespace", [
-                "experiment" => $exp->key
-            ]);
+        }
+
+        // Ignore the namespace if there are filters
+        if (!$exp->filters && $exp->namespace && !static::inNamespace($hashValue, $exp->namespace)) {
+            $this->log(LogLevel::DEBUG, "Skip experiment because not in namespace", ["experiment" => $exp->key]);
             return new ExperimentResult($exp, $hashValue, -1, false, $featureId);
         }
 
@@ -677,14 +678,17 @@ class Growthbook implements LoggerAwareInterface
      */
     public static function inNamespace(string $userId, array $namespace): bool
     {
+         // Namespace must have 3 elements: [seed, start, end]
         // @phpstan-ignore-next-line
-        if (count($namespace) < 3) {
+        if (count($namespace) !== 3) {
             return false;
         }
+        // Calculate the hash
         $n = static::hash("__" . $namespace[0], $userId, 1);
         if ($n === null) {
             return false;
         }
+       // Check if the hash is in the specified range
         return $n >= $namespace[1] && $n < $namespace[2];
     }
 
