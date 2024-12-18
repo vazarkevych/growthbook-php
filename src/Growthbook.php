@@ -2,6 +2,7 @@
 
 namespace Growthbook;
 
+use Nyholm\Psr7\Factory\Psr17Factory;
 use React\Http\Browser;
 use Http\Discovery\Psr18ClientDiscovery;
 use Http\Discovery\Psr17FactoryDiscovery;
@@ -134,9 +135,17 @@ class Growthbook implements LoggerAwareInterface
         $this->cache = $options["cache"] ?? null;
         try {
             $this->httpClient = $options["httpClient"] ?? Psr18ClientDiscovery::find();
+        } catch (\Throwable $e) {
+        // If autodetection fails, create HTTP client manually
+            $guzzleClient = new \GuzzleHttp\Client();
+            $this->httpClient = new \Http\Adapter\Guzzle7\Client($guzzleClient);
+        }
+
+        try {
             $this->requestFactory = $options["requestFactory"] ?? Psr17FactoryDiscovery::findRequestFactory();
         } catch (\Throwable $e) {
-            // Ignore errors from discovery
+            // // If autodetection fails, create the query factory manually
+            $this->requestFactory = new Psr17Factory();
         }
 
         if(array_key_exists("forcedFeatures", $options)) {
