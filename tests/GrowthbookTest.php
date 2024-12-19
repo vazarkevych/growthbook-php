@@ -624,4 +624,64 @@ final class GrowthbookTest extends TestCase
         // Even after run(), update failed due to timeout
         $this->assertNull($gb->getFeature('non-existent')->value, "No features should be loaded after timeout error");
     }
+    public function testTimerLogicForBackgroundRevalidation(): void
+    {
+        $loop = Factory::create();
+
+        // Simulate cache with stale features
+        $cache = $this->createMock(\Psr\SimpleCache\CacheInterface::class);
+        $staleFeatures = ['old-feature' => ['defaultValue' => true]];
+        $encoded = json_encode($staleFeatures);
+
+        $url = "https://cdn.growthbook.io/api/features/clientKey";
+        $cacheKey = md5($url);
+
+        // Returns stale features and old timestamp
+        $cache->method('get')->willReturnMap([
+            [$cacheKey, null, $encoded],
+            [$cacheKey.'_time', null, time() - 120], // stale
+        ]);
+
+        // Mock async client that will return updated features after the timer
+        $asyncClient = $this->createMock(\React\Http\Browser::class);
+        $updatedFeatures = ['old-feature' => ['defaultValue' => false]];
+        $responseBody = json_encode(['features' => $updatedFeatures]);
+        $response = $this->createMock(\Psr\Http\Message\ResponseInterface::class);
+        $response->method('getBody')->willReturn($responseBody);
+
+        $deferred = new Deferred();
+        $deferred->resolve($response);
+        $asyncClient->method('get')->willReturn($deferred->promise());
+
+        $gb = new Growthbook([
+            'cache' => $cache,
+            'loop' => $loop,
+            'httpClient' => $this->createMock(ClientInterface::class),
+            'requestFactory' => $this->createMock(RequestFactoryInterface::class),
+        ]);
+
+        // Inject the asyncClient mock
+        $refProperty = new \ReflectionProperty($gb, 'asyncClient');
+        $refProperty->setAccessible(true);
+        $refProperty->setValue($gb, $asyncClient);
+
+        // Load stale features from cache first
+        $gb->loadFeatures('clientKey','https://cdn.growthbook.io','', [
+            'staleWhileRevalidate' => true
+        ]);
+
+        // Assert we have stale data before the timer runs
+        $this->assertTrue($gb->isOn('old-feature'), "Initially uses stale cached features");
+
+        // Now let's explicitly call the background revalidation logic
+
+        $this->assertTrue($gb->isOn('old-feature'), "Still stale before loop run");
+
+        // Run the event loop, allowing the timer to fire and fetch new features
+        $loop->run();
+
+        // After running the loop, the timer should have triggered async fetch & update
+        $this->assertFalse($gb->isOn('old-feature'), "Features updated after timer fired and async fetch completed");
+    }
+
 }
