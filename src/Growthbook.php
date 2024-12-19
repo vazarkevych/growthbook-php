@@ -920,8 +920,9 @@ class Growthbook implements LoggerAwareInterface
             }
         }
 
-        // Otherwise, fetch from API
+        // @phpstan-ignore-next-line
         $req = $this->requestFactory->createRequest('GET', $url);
+        // @phpstan-ignore-next-line
         $res = $this->httpClient->sendRequest($req);
         $body = (string)$res->getBody();
         $parsed = json_decode($body, true);
