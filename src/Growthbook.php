@@ -770,59 +770,101 @@ class Growthbook implements LoggerAwareInterface
         return $decrypted;
     }
 
-    public function loadFeatures(string $clientKey, string $apiHost = "", string $decryptionKey = ""): void
+    public function loadFeatures(string $clientKey = "", string $apiHost = "", string $decryptionKey = ""): void
     {
-        $this->clientKey = $clientKey;
-        $this->apiHost = $apiHost;
-        $this->decryptionKey = $decryptionKey;
-
-        if (!$this->clientKey) {
-            throw new \Exception("Must specify a clientKey before loading features.");
+        // Update properties if new values are provided
+        if ($clientKey) {
+            $this->clientKey = $clientKey;
         }
-        if (!$this->httpClient) {
-            throw new \Exception("Must set an HTTP Client before loading features.");
+        if ($apiHost) {
+            $this->apiHost = $apiHost;
         }
-        if (!$this->requestFactory) {
-            throw new \Exception("Must set an HTTP Request Factory before loading features");
+        if ($decryptionKey) {
+            $this->decryptionKey = $decryptionKey;
         }
 
-        // The features URL is also the cache key
-        $url = rtrim($this->apiHost ?? self::DEFAULT_API_HOST, "/") . "/api/features/" . $this->clientKey;
+        // Form the URL and cache key
+        $url = rtrim($this->apiHost ?: self::DEFAULT_API_HOST, "/") . "/api/features/" . $this->clientKey;
         $cacheKey = md5($url);
 
-        // First try fetching from cache
+        // First, attempt to load features from cache
         if ($this->cache) {
-            $featuresJSON = $this->cache->get($cacheKey);
-            if ($featuresJSON) {
-                $features = json_decode($featuresJSON, true);
-                if ($features && is_array($features)) {
-                    $this->log(LogLevel::INFO, "Load features from cache", ["url" => $url, "numFeatures" => count($features)]);
-                    $this->withFeatures($features);
-                    return;
+            try {
+                $featuresJSON = $this->cache->get($cacheKey);
+                if ($featuresJSON) {
+                    $features = json_decode($featuresJSON, true);
+                    if ($features && is_array($features)) {
+                        $this->log(LogLevel::INFO, "Features loaded from cache", ["url" => $url, "numFeatures" => count($features)]);
+                        $this->withFeatures($features);
+                        return;
+                    }
                 }
+            } catch (\Throwable $e) {
+                $this->log(LogLevel::ERROR, "Error loading features from cache", ["exception" => $e]);
             }
         }
 
-        // Otherwise, fetch from API
-        $req = $this->requestFactory->createRequest('GET', $url);
-        $res = $this->httpClient->sendRequest($req);
-        $body = $res->getBody();
-        $parsed = json_decode($body, true);
-        if (!$parsed || !is_array($parsed) || !array_key_exists("features", $parsed)) {
-            $this->log(LogLevel::WARNING, "Could not load features", ["url" => $url, "responseBody" => $body]);
+        // If credentials or HTTP client are missing, cannot load from API
+        if (!$this->clientKey) {
+            $this->log(LogLevel::WARNING, "Missing clientKey, unable to load features from API");
+            return;
+        }
+        if (!$this->httpClient || !$this->requestFactory) {
+            $this->log(LogLevel::WARNING, "HTTP client or request factory not set, unable to load features from API");
             return;
         }
 
-        // Set features and cache for next time
-        $features = array_key_exists("encryptedFeatures", $parsed)
-            ? json_decode($this->decrypt($parsed["encryptedFeatures"]), true)
-            : $parsed["features"];
+        // Attempt to load features from API
+        try {
+            $req = $this->requestFactory->createRequest('GET', $url);
+            $res = $this->httpClient->sendRequest($req);
+            $body = (string)$res->getBody();
+            $parsed = json_decode($body, true);
+            if (!$parsed || !is_array($parsed) || (!array_key_exists("features", $parsed) && !array_key_exists("encryptedFeatures", $parsed))) {
+                $this->log(LogLevel::WARNING, "Failed to load features", ["url" => $url, "responseBody" => $body]);
+                return;
+            }
 
-        $this->log(LogLevel::INFO, "Load features from URL", ["url" => $url, "numFeatures" => count($features)]);
-        $this->withFeatures($features);
-        if ($this->cache) {
-            $this->cache->set($cacheKey, json_encode($features), $this->cacheTTL);
-            $this->log(LogLevel::INFO, "Cache features", ["url" => $url, "numFeatures" => count($features), "ttl" => $this->cacheTTL]);
+            // Set features and cache them
+            $features = array_key_exists("encryptedFeatures", $parsed)
+                ? json_decode($this->decrypt($parsed["encryptedFeatures"]), true)
+                : $parsed["features"];
+
+            if (!$features || !is_array($features)) {
+                $this->log(LogLevel::WARNING, "Invalid feature data received", ["url" => $url]);
+                return;
+            }
+
+            $this->log(LogLevel::INFO, "Features loaded from URL", ["url" => $url, "numFeatures" => count($features)]);
+            $this->withFeatures($features);
+            if ($this->cache) {
+                try {
+                    $this->cache->set($cacheKey, json_encode($features), $this->cacheTTL);
+                    $this->log(LogLevel::INFO, "Features cached", ["url" => $url, "numFeatures" => count($features), "ttl" => $this->cacheTTL]);
+                } catch (\Throwable $e) {
+                    $this->log(LogLevel::ERROR, "Error saving features to cache", ["exception" => $e]);
+                }
+            }
+        } catch (\Throwable $e) {
+            // Log error
+            $this->log(LogLevel::ERROR, "Exception while loading features from API", ["exception" => $e]);
+
+            // Attempt to use cache, even if it may be stale
+            if ($this->cache) {
+                try {
+                    $featuresJSON = $this->cache->get($cacheKey);
+                    if ($featuresJSON) {
+                        $features = json_decode($featuresJSON, true);
+                        if ($features && is_array($features)) {
+                            $this->log(LogLevel::WARNING, "Using possibly stale features from cache due to exception", ["url" => $url, "numFeatures" => count($features)]);
+                            $this->withFeatures($features);
+                            return;
+                        }
+                    }
+                } catch (\Throwable $e) {
+                    $this->log(LogLevel::ERROR, "Error loading features from cache after API exception", ["exception" => $e]);
+                }
+            }
         }
     }
 }
