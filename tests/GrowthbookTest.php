@@ -462,20 +462,27 @@ final class GrowthbookTest extends TestCase
     public function testLoadFeaturesWithTimeoutSkipCacheStaleWhileRevalidate(): void
     {
         $cache = new class implements \Psr\SimpleCache\CacheInterface {
-            private $store = [];
-            public function get($key, $default = null) {
+            private array $store = [];
+            public function get($key, $default = null): mixed
+            {
                 return $this->store[$key] ?? $default;
             }
             public function set($key, $value, $ttl = null) {
                 $this->store[$key] = $value;
                 return true;
             }
-            public function delete($key) { unset($this->store[$key]); return true; }
-            public function clear() { $this->store = []; return true; }
-            public function getMultiple($keys, $default = null) { return []; }
-            public function setMultiple($values, $ttl = null) { return true; }
-            public function deleteMultiple($keys) { return true; }
-            public function has($key) { return isset($this->store[$key]); }
+            public function delete($key): bool
+            { unset($this->store[$key]); return true; }
+            public function clear(): bool
+            { $this->store = []; return true; }
+            public function getMultiple($keys, $default = null): iterable
+            { return []; }
+            public function setMultiple($values, $ttl = null): bool
+            { return true; }
+            public function deleteMultiple($keys): bool
+            { return true; }
+            public function has($key): bool
+            { return isset($this->store[$key]); }
         };
 
 

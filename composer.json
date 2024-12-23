@@ -11,7 +11,8 @@
         "php-http/discovery": "^1.15",
         "react/http": "^1.0.0",
         "react/event-loop": "^1.0.0",
-        "react/http-client": "^0.5"
+        "react/http-client": "^0.5",
+        "react/promise-timer": "^1.11"
     },
     "require-dev": {
         "phpunit/phpunit": "^9.5",

@@ -56,12 +56,12 @@ class Growthbook implements LoggerAwareInterface
     /**
      * @var null|ClientInterface
      */
-    private $httpClient = null;
+    private $httpClient;
 
     /**
      * @var null|RequestFactoryInterface;
      */
-    public $requestFactory = null;
+    public $requestFactory;
 
     /** @var string */
     private $apiHost = "";
@@ -84,7 +84,7 @@ class Growthbook implements LoggerAwareInterface
     private $asyncClient;
 
     /**
-     * @var PromiseInterface<mixed>|null
+     * @var PromiseInterface|null
      */
     public $promise = null;
 
@@ -816,7 +816,14 @@ class Growthbook implements LoggerAwareInterface
 
         return $decrypted;
     }
-
+    /**
+     * @param array<string,mixed> $options {
+     *    @type bool $async
+     *    @type bool $skipCache
+     *    @type bool $staleWhileRevalidate
+     *    @type int  $timeout
+     * }
+     */
     public function loadFeatures(
         string $clientKey,
         string $apiHost = "",
@@ -846,6 +853,14 @@ class Growthbook implements LoggerAwareInterface
 
         $this->loadFeaturesSyncInternal($options);
     }
+    /**
+     * @param array<string,mixed> $options {
+     *    @type bool $async
+     *    @type bool $skipCache
+     *    @type bool $staleWhileRevalidate
+     *    @type int  $timeout
+     * }
+     */
     private function loadFeaturesSyncInternal(array $options): void
     {
         $timeout = $options['timeout'] ?? null;
@@ -896,7 +911,12 @@ class Growthbook implements LoggerAwareInterface
         }
     }
     /**
-     * @return PromiseInterface<array<string,mixed>>
+     * @param array<string,mixed> $options {
+     *    @type bool $async
+     *    @type bool $skipCache
+     *    @type bool $staleWhileRevalidate
+     *    @type int  $timeout
+     * }
      */
     private function loadFeaturesAsyncInternal(array $options): PromiseInterface
     {
@@ -985,6 +1005,9 @@ class Growthbook implements LoggerAwareInterface
         });
     }
 
+    /**
+     * @return array<string,mixed>|null
+     */
     private function fetchFeaturesSync(string $url): ?array
     {
         $req = $this->requestFactory->createRequest('GET', $url);
@@ -1011,7 +1034,9 @@ class Growthbook implements LoggerAwareInterface
         $this->withFeatures($features);
         return $features;
     }
-
+    /**
+     * @param array<string,mixed> $features
+     */
     private function storeFeaturesInCache(array $features, string $cacheKey): void
     {
         if ($this->cache) {
