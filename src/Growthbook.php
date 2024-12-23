@@ -2,10 +2,24 @@
 
 namespace Growthbook;
 
-use Http\Discovery\Psr18ClientDiscovery;
+use Error;
+use Exception;
 use Http\Discovery\Psr17FactoryDiscovery;
+use Http\Discovery\Psr18ClientDiscovery;
+use Psr\Http\Client\ClientInterface;
+use Psr\Http\Message\RequestFactoryInterface;
+use Psr\Http\Message\ResponseInterface;
 use Psr\Log\LoggerAwareInterface;
+use Psr\Log\LoggerInterface;
 use Psr\Log\LogLevel;
+use Psr\SimpleCache\CacheInterface;
+use React\EventLoop\Factory as LoopFactory;
+use React\EventLoop\LoopInterface;
+use React\Http\Browser;
+use React\Promise\PromiseInterface;
+use RuntimeException;
+use Throwable;
+use function React\Promise\Timer\timeout;
 
 class Growthbook implements LoggerAwareInterface
 {
@@ -13,7 +27,7 @@ class Growthbook implements LoggerAwareInterface
 
     /** @var bool */
     public $enabled = true;
-    /** @var null|\Psr\Log\LoggerInterface */
+    /** @var null|LoggerInterface */
     public $logger = null;
     /** @var string */
     private $url = "";
@@ -31,7 +45,7 @@ class Growthbook implements LoggerAwareInterface
     private $trackingCallback = null;
 
     /**
-     * @var null|\Psr\SimpleCache\CacheInterface
+     * @var null|CacheInterface
      */
     private $cache = null;
     /**
@@ -40,12 +54,12 @@ class Growthbook implements LoggerAwareInterface
     private $cacheTTL = 60;
 
     /**
-     * @var null|\Psr\Http\Client\ClientInterface
+     * @var null|ClientInterface
      */
     private $httpClient = null;
 
     /**
-     * @var null|\Psr\Http\Message\RequestFactoryInterface;
+     * @var null|RequestFactoryInterface;
      */
     public $requestFactory = null;
 
@@ -58,6 +72,21 @@ class Growthbook implements LoggerAwareInterface
 
     /** @var array<string,ViewedExperiment> */
     private $tracks = [];
+    /** @var string */
+    /**
+     * @var LoopInterface
+     */
+    private $loop;
+
+    /**
+     * @var Browser
+     */
+    private $asyncClient;
+
+    /**
+     * @var PromiseInterface<mixed>|null
+     */
+    public $promise = null;
 
     public static function create(): Growthbook
     {
@@ -65,7 +94,7 @@ class Growthbook implements LoggerAwareInterface
     }
 
     /**
-     * @param array{enabled?:bool,logger?:\Psr\Log\LoggerInterface,url?:string,attributes?:array<string,mixed>,features?:array<string,mixed>,forcedVariations?:array<string,int>,qaMode?:bool,trackingCallback?:callable,cache?:\Psr\SimpleCache\CacheInterface,httpClient?:\Psr\Http\Client\ClientInterface,requestFactory?:\Psr\Http\Message\RequestFactoryInterface,decryptionKey?:string,forcedFeatures?:array<string, FeatureResult<mixed>>} $options
+     * @param array{enabled?:bool,logger?:LoggerInterface,url?:string,attributes?:array<string,mixed>,features?:array<string,mixed>,forcedVariations?:array<string,int>,qaMode?:bool,trackingCallback?:callable,cache?:CacheInterface,httpClient?:ClientInterface,requestFactory?:RequestFactoryInterface,decryptionKey?:string,forcedFeatures?:array<string, FeatureResult<mixed>>, loop?:LoopInterface} $options
      */
     public function __construct(array $options = [])
     {
@@ -83,8 +112,13 @@ class Growthbook implements LoggerAwareInterface
             "cache",
             "httpClient",
             "requestFactory",
-            "decryptionKey"
+            "decryptionKey",
+            "loop"
+
         ];
+        $this->loop = $options['loop'] ?? LoopFactory::create();
+        $this->asyncClient = new Browser($this->loop);
+
         $unknownOptions = array_diff(array_keys($options), $knownOptions);
         if (count($unknownOptions)) {
             trigger_error('Unknown Config options: ' . implode(", ", $unknownOptions), E_USER_NOTICE);
@@ -103,11 +137,11 @@ class Growthbook implements LoggerAwareInterface
         try {
             $this->httpClient = $options["httpClient"] ?? Psr18ClientDiscovery::find();
             $this->requestFactory = $options["requestFactory"] ?? Psr17FactoryDiscovery::findRequestFactory();
-        } catch (\Throwable $e) {
+        } catch (Throwable $e) {
             // Ignore errors from discovery
         }
 
-        if(array_key_exists("forcedFeatures", $options)) {
+        if (array_key_exists("forcedFeatures", $options)) {
             $this->withForcedFeatures($options['forcedFeatures']);
         }
 
@@ -117,6 +151,7 @@ class Growthbook implements LoggerAwareInterface
         if (array_key_exists("attributes", $options)) {
             $this->withAttributes(($options["attributes"]));
         }
+
     }
 
     /**
@@ -128,6 +163,7 @@ class Growthbook implements LoggerAwareInterface
         $this->attributes = $attributes;
         return $this;
     }
+
     /**
      * @param callable|null $trackingCallback
      * @return Growthbook
@@ -137,6 +173,7 @@ class Growthbook implements LoggerAwareInterface
         $this->trackingCallback = $trackingCallback;
         return $this;
     }
+
     /**
      * @param array<string,Feature<mixed>|mixed> $features
      * @return Growthbook
@@ -153,6 +190,7 @@ class Growthbook implements LoggerAwareInterface
         }
         return $this;
     }
+
     /**
      * @param array<string,int> $forcedVariations
      * @return Growthbook
@@ -172,6 +210,7 @@ class Growthbook implements LoggerAwareInterface
         $this->forcedFeatures = $forcedFeatures;
         return $this;
     }
+
     /**
      * @param string $url
      * @return Growthbook
@@ -181,24 +220,26 @@ class Growthbook implements LoggerAwareInterface
         $this->url = $url;
         return $this;
     }
-    public function withLogger(\Psr\Log\LoggerInterface $logger = null): Growthbook
+
+    public function withLogger(LoggerInterface $logger = null): Growthbook
     {
         $this->logger = $logger;
         return $this;
     }
-    public function setLogger(\Psr\Log\LoggerInterface $logger = null): void
+
+    public function setLogger(LoggerInterface $logger = null): void
     {
         $this->logger = $logger;
     }
 
-    public function withHttpClient(\Psr\Http\Client\ClientInterface $client, \Psr\Http\Message\RequestFactoryInterface $requestFactory): Growthbook
+    public function withHttpClient(ClientInterface $client, RequestFactoryInterface $requestFactory): Growthbook
     {
         $this->httpClient = $client;
         $this->requestFactory = $requestFactory;
         return $this;
     }
 
-    public function withCache(\Psr\SimpleCache\CacheInterface $cache, int $ttl = null): Growthbook
+    public function withCache(CacheInterface $cache, int $ttl = null): Growthbook
     {
         $this->cache = $cache;
         if ($ttl !== null) {
@@ -214,6 +255,7 @@ class Growthbook implements LoggerAwareInterface
     {
         return $this->attributes;
     }
+
     /**
      * @return array<string,Feature<mixed>>
      */
@@ -221,6 +263,7 @@ class Growthbook implements LoggerAwareInterface
     {
         return $this->features;
     }
+
     /**
      * @return array<string,int>
      */
@@ -228,6 +271,7 @@ class Growthbook implements LoggerAwareInterface
     {
         return $this->forcedVariations;
     }
+
     /**
      * @return array<string, FeatureResult<mixed>>
      */
@@ -235,6 +279,7 @@ class Growthbook implements LoggerAwareInterface
     {
         return $this->forcedFeatures;
     }
+
     /**
      * @return string
      */
@@ -242,6 +287,7 @@ class Growthbook implements LoggerAwareInterface
     {
         return $this->url;
     }
+
     /**
      * @return callable|null
      */
@@ -257,10 +303,12 @@ class Growthbook implements LoggerAwareInterface
     {
         return array_values($this->tracks);
     }
+
     public function isOn(string $key): bool
     {
         return $this->getFeature($key)->on;
     }
+
     public function isOff(string $key): bool
     {
         return $this->getFeature($key)->off;
@@ -519,7 +567,7 @@ class Growthbook implements LoggerAwareInterface
         if ($this->trackingCallback) {
             try {
                 call_user_func($this->trackingCallback, $exp, $result);
-            } catch (\Throwable $e) {
+            } catch (Throwable $e) {
                 if ($this->logger) {
                     $this->log(LogLevel::ERROR, "Error calling the trackingCallback function", [
                         "experiment" => $exp->key,
@@ -557,8 +605,7 @@ class Growthbook implements LoggerAwareInterface
         if ($version === 2) {
             $n = hexdec(hash("fnv1a32", hexdec(hash("fnv1a32", $seed . $value)) . ""));
             return ($n % 10000) / 10000;
-        }
-        // Original hashing algorithm (with a bias flaw)
+        } // Original hashing algorithm (with a bias flaw)
         elseif ($version === 1) {
             $n = hexdec(hash("fnv1a32", $value . $seed));
             return ($n % 1000) / 1000;
@@ -714,7 +761,7 @@ class Growthbook implements LoggerAwareInterface
     {
         foreach ($ranges as $i => $range) {
             if (self::inRange($n, $range)) {
-                return (int) $i;
+                return (int)$i;
             }
         }
         return -1;
@@ -742,7 +789,7 @@ class Growthbook implements LoggerAwareInterface
         }
 
         // Make sure it's a valid variation integer
-        $variation = (int) $params[$id];
+        $variation = (int)$params[$id];
         if ($variation < 0 || $variation >= $numVariations) {
             return null;
         }
@@ -753,7 +800,7 @@ class Growthbook implements LoggerAwareInterface
     public function decrypt(string $encryptedString): string
     {
         if (!$this->decryptionKey) {
-            throw new \Error("Must specify a decryption key in order to use encrypted feature flags");
+            throw new Error("Must specify a decryption key in order to use encrypted feature flags");
         }
 
         $parts = explode(".", $encryptedString, 2);
@@ -764,107 +811,217 @@ class Growthbook implements LoggerAwareInterface
 
         $decrypted = openssl_decrypt($cipherText, "aes-128-cbc", $password, 0, $iv);
         if (!$decrypted) {
-            throw new \Error("Failed to decrypt");
+            throw new Error("Failed to decrypt");
         }
 
         return $decrypted;
     }
 
-    public function loadFeatures(string $clientKey = "", string $apiHost = "", string $decryptionKey = ""): void
-    {
-        // Update properties if new values are provided
-        if ($clientKey) {
-            $this->clientKey = $clientKey;
+    public function loadFeatures(
+        string $clientKey,
+        string $apiHost = "",
+        string $decryptionKey = "",
+        array  $options = []
+    ): void {
+        $this->clientKey = $clientKey;
+        $this->apiHost = $apiHost;
+        $this->decryptionKey = $decryptionKey;
+
+        $isAsync = $options['async'] ?? false;
+
+        if (!$this->clientKey) {
+            throw new Exception("Must specify a clientKey before loading features.");
         }
-        if ($apiHost) {
-            $this->apiHost = $apiHost;
+        if (!$this->httpClient) {
+            throw new Exception("Must set an HTTP Client before loading features.");
         }
-        if ($decryptionKey) {
-            $this->decryptionKey = $decryptionKey;
+        if (!$this->requestFactory) {
+            throw new Exception("Must set an HTTP Request Factory before loading features");
         }
 
-        // Form the URL and cache key
+        if ($isAsync) {
+            $this->promise = $this->loadFeaturesAsyncInternal($options);
+            return;
+        }
+
+        $this->loadFeaturesSyncInternal($options);
+    }
+    private function loadFeaturesSyncInternal(array $options): void
+    {
+        $timeout = $options['timeout'] ?? null;
+        $skipCache = $options['skipCache'] ?? false;
+        $staleWhileRevalidate = $options['staleWhileRevalidate'] ?? true;
+
         $url = rtrim($this->apiHost ?: self::DEFAULT_API_HOST, "/") . "/api/features/" . $this->clientKey;
         $cacheKey = md5($url);
+        $now = time();
 
-        // First, attempt to load features from cache
-        if ($this->cache) {
-            try {
-                $featuresJSON = $this->cache->get($cacheKey);
-                if ($featuresJSON) {
-                    $features = json_decode($featuresJSON, true);
-                    if ($features && is_array($features)) {
-                        $this->log(LogLevel::INFO, "Features loaded from cache", ["url" => $url, "numFeatures" => count($features)]);
+        if ($this->cache && !$skipCache) {
+            $cachedData = $this->cache->get($cacheKey);
+            $cachedTime = $this->cache->get($cacheKey . '_time');
+            if ($cachedData) {
+                $features = json_decode($cachedData, true);
+                if (is_array($features)) {
+                    $age = $cachedTime ? ($now - (int)$cachedTime) : PHP_INT_MAX;
+                    if ($age < $this->cacheTTL) {
+                        $this->log(LogLevel::INFO, "Load features from cache (sync)", [
+                            "url" => $url,
+                            "numFeatures" => count($features),
+                        ]);
                         $this->withFeatures($features);
                         return;
+                    } else {
+                        if ($staleWhileRevalidate) {
+                            $this->log(LogLevel::INFO, "Load stale features from cache, then revalidate (sync)", [
+                                "url" => $url,
+                                "numFeatures" => count($features),
+                            ]);
+                            $this->withFeatures($features);
+
+                            $fresh = $this->fetchFeaturesSync($url);
+                            if ($fresh !== null) {
+                                $this->storeFeaturesInCache($fresh, $cacheKey);
+                            }
+                            return;
+                        } else {
+                            $this->log(LogLevel::INFO, "Cache stale, fetch new features (sync)", ["url" => $url]);
+                        }
                     }
                 }
-            } catch (\Throwable $e) {
-                $this->log(LogLevel::ERROR, "Error loading features from cache", ["exception" => $e]);
+            }
+        }
+        $fresh = $this->fetchFeaturesSync($url);
+        if ($fresh !== null) {
+            $this->storeFeaturesInCache($fresh, $cacheKey);
+        }
+    }
+    /**
+     * @return PromiseInterface<array<string,mixed>>
+     */
+    private function loadFeaturesAsyncInternal(array $options): PromiseInterface
+    {
+        $timeout = $options['timeout'] ?? null;
+        $skipCache = $options['skipCache'] ?? false;
+        $staleWhileRevalidate = $options['staleWhileRevalidate'] ?? true;
+
+        $url = rtrim($this->apiHost ?: self::DEFAULT_API_HOST, "/") . "/api/features/" . $this->clientKey;
+        $cacheKey = md5($url);
+        $now = time();
+
+        if ($this->cache && !$skipCache) {
+            $cachedData = $this->cache->get($cacheKey);
+            $cachedTime = $this->cache->get($cacheKey . '_time');
+            if ($cachedData) {
+                $features = json_decode($cachedData, true);
+                if (is_array($features)) {
+                    $age = $cachedTime ? ($now - (int)$cachedTime) : PHP_INT_MAX;
+                    if ($age < $this->cacheTTL) {
+                        $this->log(LogLevel::INFO, "Load features from cache (async)", [
+                            "url" => $url,
+                            "numFeatures" => count($features),
+                        ]);
+                        $this->withFeatures($features);
+                        return \React\Promise\resolve($features);
+                    } else {
+                        if ($staleWhileRevalidate) {
+                            $this->log(LogLevel::INFO, "Load stale features from cache, then revalidate (async)", [
+                                "url" => $url,
+                                "numFeatures" => count($features),
+                            ]);
+                            $this->withFeatures($features);
+
+                            return $this->asyncFetchFeatures($url, $timeout)
+                                ->then(function ($fresh) use ($cacheKey) {
+                                    $this->storeFeaturesInCache($fresh, $cacheKey);
+                                    return $fresh;
+                                })
+                                ->otherwise(function (Throwable $e) {
+                                    $this->log(LogLevel::WARNING, "Revalidation failed (async)", [
+                                        "error" => $e->getMessage()
+                                    ]);
+                                    return $this->features;
+                                });
+                        } else {
+                            $this->log(LogLevel::INFO, "Cache stale, fetch new features (async)", ["url" => $url]);
+                        }
+                    }
+                }
             }
         }
 
-        // If credentials or HTTP client are missing, cannot load from API
-        if (!$this->clientKey) {
-            $this->log(LogLevel::WARNING, "Missing clientKey, unable to load features from API");
-            return;
-        }
-        if (!$this->httpClient || !$this->requestFactory) {
-            $this->log(LogLevel::WARNING, "HTTP client or request factory not set, unable to load features from API");
-            return;
-        }
+        return $this->asyncFetchFeatures($url, $timeout)
+            ->then(function ($fresh) use ($cacheKey) {
+                $this->storeFeaturesInCache($fresh, $cacheKey);
+                return $fresh;
+            });
+    }
 
-        // Attempt to load features from API
-        try {
-            $req = $this->requestFactory->createRequest('GET', $url);
-            $res = $this->httpClient->sendRequest($req);
-            $body = (string)$res->getBody();
+    private function asyncFetchFeatures(string $url, ?int $timeout): PromiseInterface
+    {
+        $request = $this->asyncClient->get($url);
+        if ($timeout !== null && $timeout > 0) {
+            $request = timeout($request, $timeout, $this->loop);
+        }
+        return $request->then(function (ResponseInterface $response) use ($url) {
+            $body = (string)$response->getBody();
             $parsed = json_decode($body, true);
-            if (!$parsed || !is_array($parsed) || (!array_key_exists("features", $parsed) && !array_key_exists("encryptedFeatures", $parsed))) {
-                $this->log(LogLevel::WARNING, "Failed to load features", ["url" => $url, "responseBody" => $body]);
-                return;
+            if (!$parsed || !is_array($parsed) || !isset($parsed['features'])) {
+                $this->log(LogLevel::WARNING, "Could not load features (async)", [
+                    "url" => $url,
+                    "responseBody" => $body
+                ]);
+                throw new RuntimeException("Invalid features response");
             }
-
-            // Set features and cache them
-            $features = array_key_exists("encryptedFeatures", $parsed)
+            $features = isset($parsed["encryptedFeatures"])
                 ? json_decode($this->decrypt($parsed["encryptedFeatures"]), true)
                 : $parsed["features"];
 
-            if (!$features || !is_array($features)) {
-                $this->log(LogLevel::WARNING, "Invalid feature data received", ["url" => $url]);
-                return;
-            }
-
-            $this->log(LogLevel::INFO, "Features loaded from URL", ["url" => $url, "numFeatures" => count($features)]);
+            $this->log(LogLevel::INFO, "Async load features from URL", [
+                "url" => $url,
+                "numFeatures" => count($features)
+            ]);
             $this->withFeatures($features);
-            if ($this->cache) {
-                try {
-                    $this->cache->set($cacheKey, json_encode($features), $this->cacheTTL);
-                    $this->log(LogLevel::INFO, "Features cached", ["url" => $url, "numFeatures" => count($features), "ttl" => $this->cacheTTL]);
-                } catch (\Throwable $e) {
-                    $this->log(LogLevel::ERROR, "Error saving features to cache", ["exception" => $e]);
-                }
-            }
-        } catch (\Throwable $e) {
-            // Log error
-            $this->log(LogLevel::ERROR, "Exception while loading features from API", ["exception" => $e]);
+            return $features;
+        });
+    }
 
-            // Attempt to use cache, even if it may be stale
-            if ($this->cache) {
-                try {
-                    $featuresJSON = $this->cache->get($cacheKey);
-                    if ($featuresJSON) {
-                        $features = json_decode($featuresJSON, true);
-                        if ($features && is_array($features)) {
-                            $this->log(LogLevel::WARNING, "Using possibly stale features from cache due to exception", ["url" => $url, "numFeatures" => count($features)]);
-                            $this->withFeatures($features);
-                            return;
-                        }
-                    }
-                } catch (\Throwable $e) {
-                    $this->log(LogLevel::ERROR, "Error loading features from cache after API exception", ["exception" => $e]);
-                }
-            }
+    private function fetchFeaturesSync(string $url): ?array
+    {
+        $req = $this->requestFactory->createRequest('GET', $url);
+        $res = $this->httpClient->sendRequest($req);
+        $body = (string)$res->getBody();
+        $parsed = json_decode($body, true);
+
+        if (!$parsed || !is_array($parsed) || !isset($parsed['features'])) {
+            $this->log(LogLevel::WARNING, "Could not load features (sync)", [
+                "url" => $url,
+                "responseBody" => $body,
+            ]);
+            return null;
+        }
+
+        $features = isset($parsed["encryptedFeatures"])
+            ? json_decode($this->decrypt($parsed["encryptedFeatures"]), true)
+            : $parsed["features"];
+
+        $this->log(LogLevel::INFO, "Load features from URL (sync)", [
+            "url" => $url,
+            "numFeatures" => count($features),
+        ]);
+        $this->withFeatures($features);
+        return $features;
+    }
+
+    private function storeFeaturesInCache(array $features, string $cacheKey): void
+    {
+        if ($this->cache) {
+            $this->cache->set($cacheKey, json_encode($features), $this->cacheTTL);
+            $this->cache->set($cacheKey . '_time', time(), $this->cacheTTL);
+            $this->log(LogLevel::INFO, "Cache features", [
+                "numFeatures" => count($features),
+                "ttl" => $this->cacheTTL
+            ]);
         }
     }
+
 }
