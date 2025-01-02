@@ -59,7 +59,7 @@ class Growthbook implements LoggerAwareInterface
     private $httpClient;
 
     /**
-     * @var null|RequestFactoryInterface;
+     * @var null|RequestFactoryInterface
      */
     public $requestFactory;
 
@@ -232,7 +232,7 @@ class Growthbook implements LoggerAwareInterface
         $this->logger = $logger;
     }
 
-    public function withHttpClient(ClientInterface $client, RequestFactoryInterface $requestFactory): Growthbook
+    public function withHttpClient(ClientInterface $client, ?RequestFactoryInterface $requestFactory = null): Growthbook
     {
         $this->httpClient = $client;
         $this->requestFactory = $requestFactory;
@@ -950,17 +950,23 @@ class Growthbook implements LoggerAwareInterface
                             ]);
                             $this->withFeatures($features);
 
-                            return $this->asyncFetchFeatures($url, $timeout)
+                            /** @var PromiseInterface<array<string,mixed>> $updatePromise */
+                            $updatePromise = $this->asyncFetchFeatures($url, $timeout)
                                 ->then(function ($fresh) use ($cacheKey) {
                                     $this->storeFeaturesInCache($fresh, $cacheKey);
                                     return $fresh;
                                 })
-                                ->otherwise(function (Throwable $e) {
-                                    $this->log(LogLevel::WARNING, "Revalidation failed (async)", [
-                                        "error" => $e->getMessage()
-                                    ]);
-                                    return $this->features;
-                                });
+                                ->then(
+                                    null,
+                                    function (Throwable $e) {
+                                        $this->log(LogLevel::WARNING, "Revalidation failed (async)", [
+                                            "error" => $e->getMessage()
+                                        ]);
+                                        return $this->features;
+                                    }
+                                );
+
+                            return $updatePromise;
                         } else {
                             $this->log(LogLevel::INFO, "Cache stale, fetch new features (async)", ["url" => $url]);
                         }
@@ -969,17 +975,27 @@ class Growthbook implements LoggerAwareInterface
             }
         }
 
-        return $this->asyncFetchFeatures($url, $timeout)
+        /** @var PromiseInterface<array<string,mixed>> $promise */
+        $promise = $this->asyncFetchFeatures($url, $timeout)
             ->then(function ($fresh) use ($cacheKey) {
                 $this->storeFeaturesInCache($fresh, $cacheKey);
                 return $fresh;
             });
+
+        return $promise;
     }
 
+    /**
+     * @param string $url
+     * @param int|null $timeout
+     * @return PromiseInterface<array<string,mixed>>
+     */
     private function asyncFetchFeatures(string $url, ?int $timeout): PromiseInterface
     {
+        /** @var PromiseInterface<ResponseInterface> $request */
         $request = $this->asyncClient->get($url);
         if ($timeout !== null && $timeout > 0) {
+            /** @var PromiseInterface<ResponseInterface> $request */
             $request = timeout($request, $timeout, $this->loop);
         }
         return $request->then(function (ResponseInterface $response) use ($url) {
@@ -1010,6 +1026,12 @@ class Growthbook implements LoggerAwareInterface
      */
     private function fetchFeaturesSync(string $url): ?array
     {
+        if (!$this->requestFactory) {
+            throw new RuntimeException("RequestFactory is null");
+        }
+        if (!$this->httpClient) {
+            throw new RuntimeException("HttpClient is null");
+        }
         $req = $this->requestFactory->createRequest('GET', $url);
         $res = $this->httpClient->sendRequest($req);
         $body = (string)$res->getBody();
@@ -1036,17 +1058,20 @@ class Growthbook implements LoggerAwareInterface
     }
     /**
      * @param array<string,mixed> $features
+     * @return bool
      */
-    private function storeFeaturesInCache(array $features, string $cacheKey): void
+    private function storeFeaturesInCache(array $features, string $cacheKey): bool
     {
         if ($this->cache) {
-            $this->cache->set($cacheKey, json_encode($features), $this->cacheTTL);
-            $this->cache->set($cacheKey . '_time', time(), $this->cacheTTL);
+            $success1 = $this->cache->set($cacheKey, json_encode($features), $this->cacheTTL);
+            $success2 = $this->cache->set($cacheKey . '_time', time(), $this->cacheTTL);
             $this->log(LogLevel::INFO, "Cache features", [
                 "numFeatures" => count($features),
                 "ttl" => $this->cacheTTL
             ]);
+            return $success1 && $success2;
         }
+        return true;
     }
 
 }
