@@ -988,10 +988,10 @@ class Growthbook implements LoggerAwareInterface
      */
     private function asyncFetchFeatures(string $url, ?int $timeout): PromiseInterface
     {
-        + /** @var PromiseInterface $request */
+         /** @var PromiseInterface $request */
         $request = $this->asyncClient->get($url);
         if ($timeout !== null && $timeout > 0) {
-            /** @var PromiseInterface<ResponseInterface> $request */
+            /** @phpstan-ignore-next-line */
             $request = timeout($request, $timeout, $this->loop);
         }
         return $request->then(function (ResponseInterface $response) use ($url) {
