@@ -12,6 +12,7 @@ use Psr\Http\Message\ResponseInterface;
 use React\EventLoop\Factory as LoopFactory;
 use React\Promise\PromiseInterface;
 use Psr\SimpleCache\CacheInterface;
+use React\Http\Browser;
 
 
 final class GrowthbookTest extends TestCase
@@ -627,26 +628,26 @@ final class GrowthbookTest extends TestCase
     public function testLoadFeaturesAsyncOption(): void
     {
         $loop = LoopFactory::create();
+        $httpClient = new Browser($loop);
         $gb = new Growthbook([
-            'loop' => $loop
+            'loop' => $loop,
+            'httpClient' => $httpClient, // Or ->setClient($httpClient) if that’s your library’s pattern
         ]);
-
         $gb->loadFeatures('demo', '', '', [
             'async' => true,
             'skipCache' => true,
-            'timeout' => 3
+            'timeout' => 3,
         ]);
+        $this->assertInstanceOf(PromiseInterface::class, $gb->promise);
 
-        $this->assertInstanceOf(PromiseInterface::class, $gb->promise, 'Expected an async Promise in $gb->promise');
-
-        $gb->promise->then(function (array $features) {
-            $this->assertIsArray($features, "Async features must be an array");
-        },
+        $gb->promise->then(
+            function (array $features) {
+                $this->assertIsArray($features, "Async features must be an array");
+            },
             function (Throwable $e) {
                 $this->fail("Async fetch failed: " . $e->getMessage());
             }
         );
-
         $loop->run();
 
         $this->assertTrue(true, "Async loadFeatures completed successfully");
