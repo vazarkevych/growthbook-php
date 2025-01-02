@@ -846,7 +846,7 @@ class Growthbook implements LoggerAwareInterface
             throw new Exception("Must set an HTTP Request Factory before loading features");
         }
 
-        if ($isAsync) {
+        if ($isAsync  && $this->promise) {
             $this->promise = $this->loadFeaturesAsyncInternal($options);
             return;
         }
@@ -984,11 +984,11 @@ class Growthbook implements LoggerAwareInterface
     /**
      * @param string $url
      * @param int|null $timeout
-     * @return PromiseInterface<array<string,mixed>>
+     * @return PromiseInterface
      */
     private function asyncFetchFeatures(string $url, ?int $timeout): PromiseInterface
     {
-        /** @var PromiseInterface<ResponseInterface> $request */
+        + /** @var PromiseInterface $request */
         $request = $this->asyncClient->get($url);
         if ($timeout !== null && $timeout > 0) {
             /** @var PromiseInterface<ResponseInterface> $request */

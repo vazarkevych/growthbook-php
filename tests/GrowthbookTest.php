@@ -11,6 +11,7 @@ use Psr\Http\Client\ClientInterface;
 use Psr\Http\Message\ResponseInterface;
 use React\EventLoop\Factory as LoopFactory;
 use React\Promise\PromiseInterface;
+use Psr\SimpleCache\CacheInterface;
 
 
 final class GrowthbookTest extends TestCase
@@ -28,13 +29,13 @@ final class GrowthbookTest extends TestCase
         if (!$this->cases) {
             $cases = file_get_contents(__DIR__ . '/cases.json');
             if (!$cases) {
-                throw new \Exception("Could not load cases.json");
+                throw new Exception("Could not load cases.json");
             }
             $this->cases = json_decode($cases, true);
         }
 
         if (!array_key_exists($section, $this->cases)) {
-            throw new \Exception("Unknown test case: $section");
+            throw new Exception("Unknown test case: $section");
         }
         $raw = $this->cases[$section];
 
@@ -68,6 +69,7 @@ final class GrowthbookTest extends TestCase
             }
         }
     }
+
     /**
      * @return array<int|string,mixed[]>
      */
@@ -84,6 +86,7 @@ final class GrowthbookTest extends TestCase
         $actual = Growthbook::hash($seed, $value, $version);
         $this->assertSame($actual, $expected);
     }
+
     /**
      * @return array<int|string,mixed[]>
      */
@@ -102,6 +105,7 @@ final class GrowthbookTest extends TestCase
     {
         $this->assertSame(Condition::evalCondition($attributes, $condition), $expected);
     }
+
     /**
      * @return array<int|string,mixed[]>
      */
@@ -119,6 +123,7 @@ final class GrowthbookTest extends TestCase
     {
         $this->assertSame(Growthbook::getQueryStringOverride($key, $url, $numVariations), $expected);
     }
+
     /**
      * @return array<int|string,mixed[]>
      */
@@ -138,6 +143,7 @@ final class GrowthbookTest extends TestCase
     {
         $this->assertSame(Growthbook::chooseVariation($n, $ranges), $expected);
     }
+
     /**
      * @return array<int|string,mixed[]>
      */
@@ -157,6 +163,7 @@ final class GrowthbookTest extends TestCase
     {
         $this->assertSame(Growthbook::inNamespace($id, $namespace), $expected);
     }
+
     /**
      * @return array<int|string,mixed[]>
      */
@@ -181,6 +188,7 @@ final class GrowthbookTest extends TestCase
             return round($w, 8);
         }, $expected));
     }
+
     /**
      * @return array<int|string,mixed[]>
      */
@@ -205,7 +213,7 @@ final class GrowthbookTest extends TestCase
         $actual = null;
         try {
             $actual = $gb->decrypt($encryptedString);
-        } catch (\Throwable $e) {
+        } catch (Throwable $e) {
             if ($expected) {
                 throw $e;
             }
@@ -250,6 +258,7 @@ final class GrowthbookTest extends TestCase
 
         $this->assertEquals($expected, $actual);
     }
+
     /**
      * @param mixed $obj
      * @param array<string,mixed> $ref
@@ -259,17 +268,18 @@ final class GrowthbookTest extends TestCase
     {
         $encoded = json_encode($obj);
         if (!$encoded) {
-            throw new \Exception("Failed to encode object");
+            throw new Exception("Failed to encode object");
         }
         $arr = json_decode($encoded, true);
         foreach ($arr as $k => $v) {
-            if ($v === null || ($k === "active" && $v && !isset($ref['active'])) || ($k === "coverage" && $v === 1 && !isset($ref['coverage'])) || ($k==="hashAttribute" && $v==="id" && !isset($ref['hashAttribute']))) {
+            if ($v === null || ($k === "active" && $v && !isset($ref['active'])) || ($k === "coverage" && $v === 1 && !isset($ref['coverage'])) || ($k === "hashAttribute" && $v === "id" && !isset($ref['hashAttribute']))) {
                 unset($arr[$k]);
             }
         }
 
         return $arr;
     }
+
     /**
      * @return array<int|string,mixed[]>
      */
@@ -297,6 +307,7 @@ final class GrowthbookTest extends TestCase
         $this->assertSame($res->inExperiment, $inExperiment);
         $this->assertSame($res->hashUsed, $hashUsed);
     }
+
     /**
      * @return array<int|string,mixed[]>
      */
@@ -308,15 +319,15 @@ final class GrowthbookTest extends TestCase
 
     public function testFluentInterface(): void
     {
-        $attributes = ['id'=>1];
+        $attributes = ['id' => 1];
         $callback = function ($exp, $res) {
             // do nothing
         };
         $features = [
-            'feature-1'=>['defaultValue'=>1, 'rules'=>[]]
+            'feature-1' => ['defaultValue' => 1, 'rules' => []]
         ];
         $url = "/home";
-        $forcedVariations = ['exp1'=>0];
+        $forcedVariations = ['exp1' => 0];
 
         $gb = Growthbook::create()
             ->withFeatures($features)
@@ -340,7 +351,7 @@ final class GrowthbookTest extends TestCase
     {
         $gb = Growthbook::create()
             ->withFeatures([
-                'feature-1'=>['defaultValue' => false, 'rules' => []]
+                'feature-1' => ['defaultValue' => false, 'rules' => []]
             ])
             ->withForcedFeatures([
                 'feature-1' => new FeatureResult(true, 'forcedFeature')
@@ -351,12 +362,12 @@ final class GrowthbookTest extends TestCase
 
     public function testInlineExperiment(): void
     {
-        $condition = ['country'=>'US'];
-        $weights = [.4,.6];
+        $condition = ['country' => 'US'];
+        $weights = [.4, .6];
         $coverage = 0.5;
         $hashAttribute = 'anonId';
 
-        $exp = InlineExperiment::create("my-test", [0,1])
+        $exp = InlineExperiment::create("my-test", [0, 1])
             ->withCondition($condition)
             ->withWeights($weights)
             ->withCoverage($coverage)
@@ -379,10 +390,10 @@ final class GrowthbookTest extends TestCase
 
         $logger = $this->createMock('Psr\Log\AbstractLogger');
         $logger->expects($this->exactly(4))->method("log")->withConsecutive(
-            [$this->equalTo("debug"),$this->stringContains("Evaluating feature")],
-            [$this->equalTo("debug"),$this->stringContains("Attempting to run experiment")],
-            [$this->equalTo("debug"),$this->stringContains("Assigned user a variation")],
-            [$this->equalTo("debug"),$this->stringContains("Use feature value from experiment")],
+            [$this->equalTo("debug"), $this->stringContains("Evaluating feature")],
+            [$this->equalTo("debug"), $this->stringContains("Attempting to run experiment")],
+            [$this->equalTo("debug"), $this->stringContains("Assigned user a variation")],
+            [$this->equalTo("debug"), $this->stringContains("Use feature value from experiment")],
         );
 
         $gb = Growthbook::create()
@@ -390,14 +401,14 @@ final class GrowthbookTest extends TestCase
             ->withLogger($logger)
             ->withAttributes(['id' => '1'])
             ->withFeatures([
-                'feature'=>[
-                    'defaultValue'=>false,
-                    'rules'=>[
+                'feature' => [
+                    'defaultValue' => false,
+                    'rules' => [
                         [
-                            'variations'=>[false,true],
-                            'meta'=>[
-                                ['key'=>'control'],
-                                ['key'=>'variation']
+                            'variations' => [false, true],
+                            'meta' => [
+                                ['key' => 'control'],
+                                ['key' => 'variation']
                             ]
                         ]
                     ]
@@ -417,6 +428,7 @@ final class GrowthbookTest extends TestCase
         $this->assertSame($calls[0][1]->bucket, 0.906);
         $this->assertSame($calls[0][1]->featureId, "feature");
     }
+
     public function testTrackingCallbackExceptionWithLogger(): void
     {
         $logCalls = [];
@@ -429,7 +441,7 @@ final class GrowthbookTest extends TestCase
             ->withLogger($logger)
             ->withAttributes(['id' => 'user123'])
             ->withTrackingCallback(function () {
-                throw new \Exception("Test exception");
+                throw new Exception("Test exception");
             });
 
         $exp = new InlineExperiment("test-exp", [0, 1]);
@@ -447,21 +459,23 @@ final class GrowthbookTest extends TestCase
 
     public function testTrackingCallbackExceptionWithoutLogger(): void
     {
-        $this->expectException(\Exception::class);
+        $this->expectException(Exception::class);
         $this->expectExceptionMessage("Test exception");
 
         $gb = Growthbook::create()
             ->withAttributes(['id' => 'user123'])
             ->withTrackingCallback(function () {
-                throw new \Exception("Test exception");
+                throw new Exception("Test exception");
             });
 
         $exp = new InlineExperiment("test-exp", [0, 1]);
         $gb->runInlineExperiment($exp);
     }
+
     public function testLoadFeaturesWithTimeoutSkipCacheStaleWhileRevalidate(): void
     {
-        $cache = new class implements \Psr\SimpleCache\CacheInterface {
+        $cache = new class implements CacheInterface {
+            /** @var array<string,mixed> */
             private array $store = [];
 
             public function get(string $key, mixed $default = null): mixed
@@ -488,6 +502,7 @@ final class GrowthbookTest extends TestCase
                 $this->store = [];
                 return true;
             }
+
             public function getMultiple(iterable $keys, mixed $default = null): iterable
             {
                 $results = [];
@@ -496,6 +511,9 @@ final class GrowthbookTest extends TestCase
                 }
                 return $results;
             }
+            /**
+             * @param iterable<string,mixed> $values
+             */
             public function setMultiple(iterable $values, DateInterval|int|null $ttl = null): bool
             {
                 foreach ($values as $k => $v) {
@@ -512,6 +530,7 @@ final class GrowthbookTest extends TestCase
                 }
                 return true;
             }
+
             public function has(string $key): bool
             {
                 return isset($this->store[$key]);
@@ -551,7 +570,7 @@ final class GrowthbookTest extends TestCase
         ]]));
         $httpClientMock2 = $this->createMock(ClientInterface::class);
         $httpClientMock2->expects($this->never())
-        ->method('sendRequest');
+            ->method('sendRequest');
 
         $gb->withHttpClient($httpClientMock2, $gb->requestFactory);
 
@@ -581,7 +600,7 @@ final class GrowthbookTest extends TestCase
         ]);
         $this->assertSame(123, $gb->getValue('skipcache-feature', null));
 
-        $cache->set($cacheKey.'_time', time() - 9999);
+        $cache->set($cacheKey . '_time', time() - 9999);
 
         $responseMock4 = $this->createMock(ResponseInterface::class);
         $responseMock4->method('getBody')->willReturn(json_encode(["features" => [
@@ -589,7 +608,7 @@ final class GrowthbookTest extends TestCase
         ]]));
         $httpClientMock4 = $this->createMock(ClientInterface::class);
         $httpClientMock4->expects($this->once())
-        ->method('sendRequest')
+            ->method('sendRequest')
             ->willReturn($responseMock4);
 
         $gb->withHttpClient($httpClientMock4, $gb->requestFactory);
@@ -622,11 +641,14 @@ final class GrowthbookTest extends TestCase
 
         $gb->promise->then(function (array $features) {
             $this->assertIsArray($features, "Async features must be an array");
-        })->otherwise(function (\Throwable $e) {
-            $this->fail("Async fetch failed: " . $e->getMessage());
-        });
+        },
+            function (Throwable $e) {
+                $this->fail("Async fetch failed: " . $e->getMessage());
+            }
+        );
 
         $loop->run();
 
         $this->assertTrue(true, "Async loadFeatures completed successfully");
-    }}
+    }
+}
