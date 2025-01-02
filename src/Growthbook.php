@@ -942,40 +942,36 @@ class Growthbook implements LoggerAwareInterface
                         ]);
                         $this->withFeatures($features);
                         return \React\Promise\resolve($features);
-                    } else {
-                        if ($staleWhileRevalidate) {
-                            $this->log(LogLevel::INFO, "Load stale features from cache, then revalidate (async)", [
-                                "url" => $url,
-                                "numFeatures" => count($features),
-                            ]);
-                            $this->withFeatures($features);
-
-                            /** @var PromiseInterface<array<string,mixed>> $updatePromise */
-                            $updatePromise = $this->asyncFetchFeatures($url, $timeout)
-                                ->then(function ($fresh) use ($cacheKey) {
-                                    $this->storeFeaturesInCache($fresh, $cacheKey);
-                                    return $fresh;
-                                })
-                                ->then(
-                                    null,
-                                    function (Throwable $e) {
-                                        $this->log(LogLevel::WARNING, "Revalidation failed (async)", [
-                                            "error" => $e->getMessage()
-                                        ]);
-                                        return $this->features;
-                                    }
-                                );
-
-                            return $updatePromise;
-                        } else {
-                            $this->log(LogLevel::INFO, "Cache stale, fetch new features (async)", ["url" => $url]);
-                        }
                     }
+                    if ($staleWhileRevalidate) {
+                        $this->log(LogLevel::INFO, "Load stale features from cache, then revalidate (async)", [
+                            "url" => $url,
+                            "numFeatures" => count($features),
+                        ]);
+                        $this->withFeatures($features);
+                        $updatePromise = $this->asyncFetchFeatures($url, $timeout)
+                            ->then(function ($fresh) use ($cacheKey) {
+                                $this->storeFeaturesInCache($fresh, $cacheKey);
+                                return $fresh;
+                            })
+                            ->then(
+                                null,
+                                function (Throwable $e) {
+                                    $this->log(LogLevel::WARNING, "Revalidation failed (async)", [
+                                        "error" => $e->getMessage()
+                                    ]);
+                                    return $this->features;
+                                }
+                            );
+
+                        return $updatePromise;
+                    }
+
+                    $this->log(LogLevel::INFO, "Cache stale, fetch new features (async)", ["url" => $url]);
                 }
             }
         }
 
-        /** @var PromiseInterface<array<string,mixed>> $promise */
         $promise = $this->asyncFetchFeatures($url, $timeout)
             ->then(function ($fresh) use ($cacheKey) {
                 $this->storeFeaturesInCache($fresh, $cacheKey);

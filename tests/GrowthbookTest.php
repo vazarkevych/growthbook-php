@@ -463,26 +463,59 @@ final class GrowthbookTest extends TestCase
     {
         $cache = new class implements \Psr\SimpleCache\CacheInterface {
             private array $store = [];
-            public function get($key, $default = null): mixed
+
+            public function get(string $key, mixed $default = null): mixed
             {
                 return $this->store[$key] ?? $default;
             }
-            public function set($key, $value, $ttl = null) {
+
+            public function set(string $key, mixed $value, DateInterval|int|null $ttl = null): bool
+            {
                 $this->store[$key] = $value;
                 return true;
             }
-            public function delete($key): bool
-            { unset($this->store[$key]); return true; }
+
+            // delete(string $key): bool
+            public function delete(string $key): bool
+            {
+                unset($this->store[$key]);
+                return true;
+            }
+
+            // clear(): bool
             public function clear(): bool
-            { $this->store = []; return true; }
-            public function getMultiple($keys, $default = null): iterable
-            { return []; }
-            public function setMultiple($values, $ttl = null): bool
-            { return true; }
-            public function deleteMultiple($keys): bool
-            { return true; }
-            public function has($key): bool
-            { return isset($this->store[$key]); }
+            {
+                $this->store = [];
+                return true;
+            }
+            public function getMultiple(iterable $keys, mixed $default = null): iterable
+            {
+                $results = [];
+                foreach ($keys as $k) {
+                    $results[$k] = $this->store[$k] ?? $default;
+                }
+                return $results;
+            }
+            public function setMultiple(iterable $values, DateInterval|int|null $ttl = null): bool
+            {
+                foreach ($values as $k => $v) {
+                    $this->store[$k] = $v;
+                }
+                return true;
+            }
+
+            // deleteMultiple(iterable $keys): bool
+            public function deleteMultiple(iterable $keys): bool
+            {
+                foreach ($keys as $k) {
+                    unset($this->store[$k]);
+                }
+                return true;
+            }
+            public function has(string $key): bool
+            {
+                return isset($this->store[$key]);
+            }
         };
 
 
