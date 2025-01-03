@@ -17,6 +17,7 @@ use React\EventLoop\Factory as LoopFactory;
 use React\EventLoop\LoopInterface;
 use React\Http\Browser;
 use React\Promise\PromiseInterface;
+use function React\Promise\resolve;
 use RuntimeException;
 use Throwable;
 use function React\Promise\Timer\timeout;
@@ -54,7 +55,7 @@ class Growthbook implements LoggerAwareInterface
     private $cacheTTL = 60;
 
     /**
-     * @var null|ClientInterface
+     * @var ClientInterface|Browser|null
      */
     private $httpClient;
 
@@ -83,10 +84,10 @@ class Growthbook implements LoggerAwareInterface
      */
     private $asyncClient;
 
-    /**
-     * @var PromiseInterface|null
+    /***
+     * @var PromiseInterface
      */
-    public $promise = null;
+    public $promise;
 
     public static function create(): Growthbook
     {
@@ -98,7 +99,8 @@ class Growthbook implements LoggerAwareInterface
      */
     public function __construct(array $options = [])
     {
-        // Warn if any unknown options are passed
+        $this->promise = resolve(null);
+
         $knownOptions = [
             "enabled",
             "logger",
@@ -114,44 +116,53 @@ class Growthbook implements LoggerAwareInterface
             "requestFactory",
             "decryptionKey",
             "loop"
-
         ];
-        $this->loop = $options['loop'] ?? LoopFactory::create();
-        $this->asyncClient = new Browser($this->loop);
 
         $unknownOptions = array_diff(array_keys($options), $knownOptions);
         if (count($unknownOptions)) {
-            trigger_error('Unknown Config options: ' . implode(", ", $unknownOptions), E_USER_NOTICE);
+            trigger_error(
+                'Unknown Config options: ' . implode(", ", $unknownOptions),
+                E_USER_NOTICE
+            );
         }
 
         $this->enabled = $options["enabled"] ?? true;
         $this->logger = $options["logger"] ?? null;
-        $this->url = $options["url"] ?? $_SERVER['REQUEST_URI'] ?? "";
+        $this->url = $options["url"] ?? ($_SERVER['REQUEST_URI'] ?? "");
         $this->forcedVariations = $options["forcedVariations"] ?? [];
         $this->qaMode = $options["qaMode"] ?? false;
         $this->trackingCallback = $options["trackingCallback"] ?? null;
-
         $this->decryptionKey = $options["decryptionKey"] ?? "";
-
         $this->cache = $options["cache"] ?? null;
-        try {
-            $this->httpClient = $options["httpClient"] ?? Psr18ClientDiscovery::find();
-            $this->requestFactory = $options["requestFactory"] ?? Psr17FactoryDiscovery::findRequestFactory();
-        } catch (Throwable $e) {
-            // Ignore errors from discovery
+
+        $this->loop = $options['loop'] ?? LoopFactory::create();
+        $this->asyncClient = new Browser($this->loop);
+
+        $this->httpClient = $options["httpClient"] ?? null;
+        $this->requestFactory = $options["requestFactory"] ?? null;
+
+        if (!$this->httpClient) {
+            try {
+                $this->httpClient = Psr18ClientDiscovery::find();
+            } catch (Throwable $e) {
+            }
+        }
+        if (!$this->requestFactory) {
+            try {
+                $this->requestFactory = Psr17FactoryDiscovery::findRequestFactory();
+            } catch (Throwable $e) {
+            }
         }
 
         if (array_key_exists("forcedFeatures", $options)) {
             $this->withForcedFeatures($options['forcedFeatures']);
         }
-
         if (array_key_exists("features", $options)) {
-            $this->withFeatures(($options["features"]));
+            $this->withFeatures($options["features"]);
         }
         if (array_key_exists("attributes", $options)) {
-            $this->withAttributes(($options["attributes"]));
+            $this->withAttributes($options["attributes"]);
         }
-
     }
 
     /**
@@ -205,7 +216,7 @@ class Growthbook implements LoggerAwareInterface
      * @param array<string, FeatureResult<mixed>> $forcedFeatures
      * @return Growthbook
      */
-    public function withForcedFeatures(array $forcedFeatures)
+    public function withForcedFeatures(array $forcedFeatures): Growthbook
     {
         $this->forcedFeatures = $forcedFeatures;
         return $this;
@@ -232,7 +243,7 @@ class Growthbook implements LoggerAwareInterface
         $this->logger = $logger;
     }
 
-    public function withHttpClient(ClientInterface $client, ?RequestFactoryInterface $requestFactory = null): Growthbook
+    public function withHttpClient($client, ?RequestFactoryInterface $requestFactory = null): Growthbook
     {
         $this->httpClient = $client;
         $this->requestFactory = $requestFactory;
@@ -346,7 +357,6 @@ class Growthbook implements LoggerAwareInterface
                 "feature" => $key,
                 "result" => $this->forcedFeatures[$key],
             ]);
-
             return $this->forcedFeatures[$key];
         }
 
@@ -605,7 +615,8 @@ class Growthbook implements LoggerAwareInterface
         if ($version === 2) {
             $n = hexdec(hash("fnv1a32", hexdec(hash("fnv1a32", $seed . $value)) . ""));
             return ($n % 10000) / 10000;
-        } // Original hashing algorithm (with a bias flaw)
+        }
+        // Original hashing algorithm (with a bias flaw)
         elseif ($version === 1) {
             $n = hexdec(hash("fnv1a32", $value . $seed));
             return ($n % 1000) / 1000;
@@ -632,8 +643,13 @@ class Growthbook implements LoggerAwareInterface
      * @param int|null $hashVersion
      * @return bool
      */
-    private function isIncludedInRollout(string $seed, string $hashAttribute = null, array $range = null, float $coverage = null, int $hashVersion = null): bool
-    {
+    private function isIncludedInRollout(
+        string $seed,
+        string $hashAttribute = null,
+        array $range = null,
+        float $coverage = null,
+        int $hashVersion = null
+    ): bool {
         if ($coverage === null && $range === null) {
             return true;
         }
@@ -662,7 +678,12 @@ class Growthbook implements LoggerAwareInterface
     }
 
     /**
-     * @param array{seed:string,ranges:array{0:float,1:float}[],hashVersion?:int,attribute?:string}[] $filters
+     * @param array{
+     *   seed:string,
+     *   ranges:array{0:float,1:float}[],
+     *   hashVersion?:int,
+     *   attribute?:string
+     * }[] $filters
      * @return bool
      */
     private function isFilteredOut(array $filters): bool
@@ -700,7 +721,6 @@ class Growthbook implements LoggerAwareInterface
      */
     public static function inNamespace(string $userId, array $namespace): bool
     {
-        // @phpstan-ignore-next-line
         if (count($namespace) < 3) {
             return false;
         }
@@ -730,10 +750,12 @@ class Growthbook implements LoggerAwareInterface
      * @param null|(float[]) $weights
      * @return array{0:float,1:float}[]
      */
-    public static function getBucketRanges(int $numVariations, float $coverage, array $weights = null): array
-    {
+    public static function getBucketRanges(
+        int $numVariations,
+        float $coverage,
+        array $weights = null
+    ): array {
         $coverage = max(0, min(1, $coverage));
-
         if (!$weights || count($weights) !== $numVariations) {
             $weights = static::getEqualWeights($numVariations);
         }
@@ -773,27 +795,24 @@ class Growthbook implements LoggerAwareInterface
      * @param int $numVariations
      * @return int|null
      */
-    public static function getQueryStringOverride(string $id, string $url, int $numVariations): ?int
-    {
-        // Extract the querystring from the url
-        /** @var string|false */
+    public static function getQueryStringOverride(
+        string $id,
+        string $url,
+        int $numVariations
+    ): ?int {
+        /** @var string|false $query */
         $query = parse_url($url, PHP_URL_QUERY);
         if (!$query) {
             return null;
         }
-
-        // Parse the query string and check if $id is there
         parse_str($query, $params);
         if (!isset($params[$id]) || !is_numeric($params[$id])) {
             return null;
         }
-
-        // Make sure it's a valid variation integer
         $variation = (int)$params[$id];
         if ($variation < 0 || $variation >= $numVariations) {
             return null;
         }
-
         return $variation;
     }
 
@@ -802,7 +821,6 @@ class Growthbook implements LoggerAwareInterface
         if (!$this->decryptionKey) {
             throw new Error("Must specify a decryption key in order to use encrypted feature flags");
         }
-
         $parts = explode(".", $encryptedString, 2);
         $iv = base64_decode($parts[0]);
         $cipherText = $parts[1];
@@ -813,7 +831,6 @@ class Growthbook implements LoggerAwareInterface
         if (!$decrypted) {
             throw new Error("Failed to decrypt");
         }
-
         return $decrypted;
     }
     /**
@@ -823,13 +840,15 @@ class Growthbook implements LoggerAwareInterface
      *    @type bool $staleWhileRevalidate
      *    @type int  $timeout
      * }
+     *
+     * @return PromiseInterface
      */
     public function loadFeatures(
         string $clientKey,
         string $apiHost = "",
         string $decryptionKey = "",
         array  $options = []
-    ): void {
+    ): PromiseInterface {
         $this->clientKey = $clientKey;
         $this->apiHost = $apiHost;
         $this->decryptionKey = $decryptionKey;
@@ -846,12 +865,14 @@ class Growthbook implements LoggerAwareInterface
             throw new Exception("Must set an HTTP Request Factory before loading features");
         }
 
-        if ($isAsync  && $this->promise) {
+        if ($isAsync) {
             $this->promise = $this->loadFeaturesAsyncInternal($options);
-            return;
+            return $this->promise;
         }
 
         $this->loadFeaturesSyncInternal($options);
+        $this->promise = resolve(null);
+        return $this->promise;
     }
     /**
      * @param array<string,mixed> $options {
@@ -867,7 +888,8 @@ class Growthbook implements LoggerAwareInterface
         $skipCache = $options['skipCache'] ?? false;
         $staleWhileRevalidate = $options['staleWhileRevalidate'] ?? true;
 
-        $url = rtrim($this->apiHost ?: self::DEFAULT_API_HOST, "/") . "/api/features/" . $this->clientKey;
+        $url = rtrim($this->apiHost ?: self::DEFAULT_API_HOST, "/")
+            . "/api/features/" . $this->clientKey;
         $cacheKey = md5($url);
         $now = time();
 
@@ -941,7 +963,7 @@ class Growthbook implements LoggerAwareInterface
                             "numFeatures" => count($features),
                         ]);
                         $this->withFeatures($features);
-                        return \React\Promise\resolve($features);
+                        return resolve($features);
                     }
                     if ($staleWhileRevalidate) {
                         $this->log(LogLevel::INFO, "Load stale features from cache, then revalidate (async)", [
@@ -977,21 +999,18 @@ class Growthbook implements LoggerAwareInterface
                 $this->storeFeaturesInCache($fresh, $cacheKey);
                 return $fresh;
             });
-
         return $promise;
     }
 
     /**
      * @param string $url
      * @param int|null $timeout
-     * @return PromiseInterface
+     * @return PromiseInterface<array<string,mixed>>
      */
     private function asyncFetchFeatures(string $url, ?int $timeout): PromiseInterface
     {
-         /** @var PromiseInterface $request */
         $request = $this->asyncClient->get($url);
         if ($timeout !== null && $timeout > 0) {
-            /** @phpstan-ignore-next-line */
             $request = timeout($request, $timeout, $this->loop);
         }
         return $request->then(function (ResponseInterface $response) use ($url) {
