@@ -84,8 +84,8 @@ class Growthbook implements LoggerAwareInterface
      */
     private $asyncClient;
 
-    /***
-     * @var PromiseInterface
+    /**
+     * @var \React\Promise\PromiseInterface|null
      */
     public $promise;
 
@@ -243,7 +243,7 @@ class Growthbook implements LoggerAwareInterface
         $this->logger = $logger;
     }
 
-    public function withHttpClient($client, ?RequestFactoryInterface $requestFactory = null): Growthbook
+    public function withHttpClient(\Psr\Http\Client\ClientInterface $client, ?\Psr\Http\Message\RequestFactoryInterface $requestFactory = null): self
     {
         $this->httpClient = $client;
         $this->requestFactory = $requestFactory;
@@ -1003,14 +1003,14 @@ class Growthbook implements LoggerAwareInterface
     }
 
     /**
-     * @param string $url
-     * @param int|null $timeout
-     * @return PromiseInterface<array<string,mixed>>
+     * @return \React\Promise\PromiseInterface
      */
     private function asyncFetchFeatures(string $url, ?int $timeout): PromiseInterface
     {
+        /** @var \React\Promise\PromiseInterface<ResponseInterface> $request */
         $request = $this->asyncClient->get($url);
         if ($timeout !== null && $timeout > 0) {
+            /** @var \React\Promise\PromiseInterface<ResponseInterface> $request */
             $request = timeout($request, $timeout, $this->loop);
         }
         return $request->then(function (ResponseInterface $response) use ($url) {
