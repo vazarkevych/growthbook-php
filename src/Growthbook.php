@@ -85,8 +85,7 @@ class Growthbook implements LoggerAwareInterface
     private $asyncClient;
 
     /**
-     * @var \React\Promise\PromiseInterface|null
-     */
+    * @var null|PromiseInterface $request */
     public $promise;
 
     public static function create(): Growthbook
@@ -95,7 +94,22 @@ class Growthbook implements LoggerAwareInterface
     }
 
     /**
-     * @param array{enabled?:bool,logger?:LoggerInterface,url?:string,attributes?:array<string,mixed>,features?:array<string,mixed>,forcedVariations?:array<string,int>,qaMode?:bool,trackingCallback?:callable,cache?:CacheInterface,httpClient?:ClientInterface,requestFactory?:RequestFactoryInterface,decryptionKey?:string,forcedFeatures?:array<string, FeatureResult<mixed>>, loop?:LoopInterface} $options
+     * @param array{
+     *   enabled?: bool,
+     *   logger?: LoggerInterface,
+     *   url?: string,
+     *   attributes?: array<string,mixed>,
+     *   features?: array<string,mixed>,
+     *   forcedVariations?: array<string,int>,
+     *   forcedFeatures?: array<string, FeatureResult<mixed>>,
+     *   qaMode?: bool,
+     *   trackingCallback?: callable,
+     *   cache?: CacheInterface,
+     *   httpClient?: ClientInterface|Browser,
+     *   requestFactory?: RequestFactoryInterface,
+     *   decryptionKey?: string,
+     *   loop?: LoopInterface
+     * } $options
      */
     public function __construct(array $options = [])
     {
@@ -721,6 +735,7 @@ class Growthbook implements LoggerAwareInterface
      */
     public static function inNamespace(string $userId, array $namespace): bool
     {
+        // @phpstan-ignore-next-line
         if (count($namespace) < 3) {
             return false;
         }
@@ -1003,14 +1018,14 @@ class Growthbook implements LoggerAwareInterface
     }
 
     /**
-     * @return \React\Promise\PromiseInterface
+     * @return PromiseInterface<mixed>
      */
     private function asyncFetchFeatures(string $url, ?int $timeout): PromiseInterface
     {
-        /** @var \React\Promise\PromiseInterface<ResponseInterface> $request */
+        /** @var PromiseInterface<ResponseInterface> $request */
         $request = $this->asyncClient->get($url);
         if ($timeout !== null && $timeout > 0) {
-            /** @var \React\Promise\PromiseInterface<ResponseInterface> $request */
+            /** @var PromiseInterface<ResponseInterface> $request */
             $request = timeout($request, $timeout, $this->loop);
         }
         return $request->then(function (ResponseInterface $response) use ($url) {
