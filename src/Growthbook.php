@@ -17,9 +17,9 @@ use React\EventLoop\Factory as LoopFactory;
 use React\EventLoop\LoopInterface;
 use React\Http\Browser;
 use React\Promise\PromiseInterface;
-use function React\Promise\resolve;
 use RuntimeException;
 use Throwable;
+use function React\Promise\resolve;
 use function React\Promise\Timer\timeout;
 
 /**
@@ -158,20 +158,20 @@ class Growthbook implements LoggerAwareInterface
             );
         }
 
-        $this->enabled         = $options["enabled"] ?? true;
-        $this->logger          = $options["logger"] ?? null;
-        $this->url             = $options["url"] ?? ($_SERVER['REQUEST_URI'] ?? "");
+        $this->enabled = $options["enabled"] ?? true;
+        $this->logger = $options["logger"] ?? null;
+        $this->url = $options["url"] ?? ($_SERVER['REQUEST_URI'] ?? "");
         $this->forcedVariations = $options["forcedVariations"] ?? [];
-        $this->qaMode          = $options["qaMode"] ?? false;
+        $this->qaMode = $options["qaMode"] ?? false;
         $this->trackingCallback = $options["trackingCallback"] ?? null;
-        $this->decryptionKey   = $options["decryptionKey"] ?? "";
-        $this->cache           = $options["cache"] ?? null;
+        $this->decryptionKey = $options["decryptionKey"] ?? "";
+        $this->cache = $options["cache"] ?? null;
 
         // ReactPHP EventLoop (used for async calls)
-        $this->loop        = $options['loop'] ?? LoopFactory::create();
+        $this->loop = $options['loop'] ?? LoopFactory::create();
         $this->asyncClient = new Browser($this->loop);
 
-        $this->httpClient     = $options["httpClient"] ?? null;
+        $this->httpClient = $options["httpClient"] ?? null;
         $this->requestFactory = $options["requestFactory"] ?? null;
 
         // Try discovering PSR-18 and PSR-17 implementations if not supplied
@@ -402,7 +402,7 @@ class Growthbook implements LoggerAwareInterface
         if (array_key_exists($key, $this->forcedFeatures)) {
             $this->log(LogLevel::DEBUG, "Feature Forced - $key", [
                 "feature" => $key,
-                "result"  => $this->forcedFeatures[$key],
+                "result" => $this->forcedFeatures[$key],
             ]);
             return $this->forcedFeatures[$key];
         }
@@ -412,7 +412,7 @@ class Growthbook implements LoggerAwareInterface
                 if ($rule->condition) {
                     if (!Condition::evalCondition($this->attributes, $rule->condition)) {
                         $this->log(LogLevel::DEBUG, "Skip rule because of targeting condition", [
-                            "feature"   => $key,
+                            "feature" => $key,
                             "condition" => $rule->condition
                         ]);
                         continue;
@@ -444,7 +444,7 @@ class Growthbook implements LoggerAwareInterface
                     }
                     $this->log(LogLevel::DEBUG, "Force feature value from rule", [
                         "feature" => $key,
-                        "value"   => $rule->force
+                        "value" => $rule->force
                     ]);
                     return new FeatureResult($rule->force, "force");
                 }
@@ -475,7 +475,7 @@ class Growthbook implements LoggerAwareInterface
                 }
                 $this->log(LogLevel::DEBUG, "Use feature value from experiment", [
                     "feature" => $key,
-                    "value"   => $result->value
+                    "value" => $result->value
                 ]);
                 return new FeatureResult($result->value, "experiment", $exp, $result);
             }
@@ -528,7 +528,7 @@ class Growthbook implements LoggerAwareInterface
             if ($qsOverride !== null) {
                 $this->log(LogLevel::DEBUG, "Force variation from querystring", [
                     "experiment" => $exp->key,
-                    "variation"  => $qsOverride
+                    "variation" => $qsOverride
                 ]);
                 return new ExperimentResult($exp, $hashValue, $qsOverride, false, $featureId);
             }
@@ -538,7 +538,7 @@ class Growthbook implements LoggerAwareInterface
         if (array_key_exists($exp->key, $this->forcedVariations)) {
             $this->log(LogLevel::DEBUG, "Force variation from context", [
                 "experiment" => $exp->key,
-                "variation"  => $this->forcedVariations[$exp->key]
+                "variation" => $this->forcedVariations[$exp->key]
             ]);
             return new ExperimentResult($exp, $hashValue, $this->forcedVariations[$exp->key], false, $featureId);
         }
@@ -609,7 +609,7 @@ class Growthbook implements LoggerAwareInterface
         if ($exp->force !== null) {
             $this->log(LogLevel::DEBUG, "Force variation from the experiment config", [
                 "experiment" => $exp->key,
-                "variation"  => $exp->force
+                "variation" => $exp->force
             ]);
             return new ExperimentResult($exp, $hashValue, $exp->force, false, $featureId);
         }
@@ -634,7 +634,7 @@ class Growthbook implements LoggerAwareInterface
                 if ($this->logger) {
                     $this->log(LogLevel::ERROR, "Error calling the trackingCallback function", [
                         "experiment" => $exp->key,
-                        "error"      => $e
+                        "error" => $e
                     ]);
                 } else {
                     throw $e;
@@ -645,7 +645,7 @@ class Growthbook implements LoggerAwareInterface
         // 15. Return the result
         $this->log(LogLevel::DEBUG, "Assigned user a variation", [
             "experiment" => $exp->key,
-            "variation"  => $assigned
+            "variation" => $assigned
         ]);
         return $result;
     }
@@ -653,7 +653,7 @@ class Growthbook implements LoggerAwareInterface
     /**
      * @param string $level
      * @param string $message
-     * @param mixed  $context
+     * @param mixed $context
      */
     public function log(string $level, string $message, $context = []): void
     {
@@ -675,8 +675,7 @@ class Growthbook implements LoggerAwareInterface
         if ($version === 2) {
             $n = hexdec(hash("fnv1a32", hexdec(hash("fnv1a32", $seed . $value)) . ""));
             return ($n % 10000) / 10000;
-        }
-        // Version 1 hashing
+        } // Version 1 hashing
         elseif ($version === 1) {
             $n = hexdec(hash("fnv1a32", $value . $seed));
             return ($n % 1000) / 1000;
@@ -698,19 +697,20 @@ class Growthbook implements LoggerAwareInterface
     /**
      * Check if user is included in a rollout
      *
-     * @param string      $seed
+     * @param string $seed
      * @param string|null $hashAttribute
      * @param array{0:float,1:float}|null $range
-     * @param float|null  $coverage
-     * @param int|null    $hashVersion
+     * @param float|null $coverage
+     * @param int|null $hashVersion
      */
     private function isIncludedInRollout(
         string $seed,
         string $hashAttribute = null,
-        array $range = null,
-        float $coverage = null,
-        int $hashVersion = null
-    ): bool {
+        array  $range = null,
+        float  $coverage = null,
+        int    $hashVersion = null
+    ): bool
+    {
         if ($coverage === null && $range === null) {
             return true;
         }
@@ -775,11 +775,12 @@ class Growthbook implements LoggerAwareInterface
     /**
      * Check if user is in a namespace
      *
-     * @param string                 $userId
+     * @param string $userId
      * @param array{0:string,1:float,2:float} $namespace
      */
     public static function inNamespace(string $userId, array $namespace): bool
     {
+        // @phpstan-ignore-next-line
         if (count($namespace) < 3) {
             return false;
         }
@@ -807,8 +808,8 @@ class Growthbook implements LoggerAwareInterface
     /**
      * Build bucket ranges for each variation
      *
-     * @param int         $numVariations
-     * @param float       $coverage
+     * @param int $numVariations
+     * @param float $coverage
      * @param float[]|null $weights
      * @return array{0:float,1:float}[]
      */
@@ -836,7 +837,7 @@ class Growthbook implements LoggerAwareInterface
     /**
      * Determine which variation a user is bucketed into
      *
-     * @param float                 $n
+     * @param float $n
      * @param array{0:float,1:float}[] $ranges
      * @return int
      */
@@ -855,7 +856,7 @@ class Growthbook implements LoggerAwareInterface
      *
      * @param string $id
      * @param string $url
-     * @param int    $numVariations
+     * @param int $numVariations
      * @return int|null
      */
     public static function getQueryStringOverride(string $id, string $url, int $numVariations): ?int
@@ -900,10 +901,10 @@ class Growthbook implements LoggerAwareInterface
      * Load features (async or sync)
      *
      * @param array<string,mixed> $options {
-     *    @type bool $async
-     *    @type bool $skipCache
-     *    @type bool $staleWhileRevalidate
-     *    @type int  $timeout
+     * @type bool $async
+     * @type bool $skipCache
+     * @type bool $staleWhileRevalidate
+     * @type int $timeout
      * }
      * @return PromiseInterface
      */
@@ -912,9 +913,10 @@ class Growthbook implements LoggerAwareInterface
         string $apiHost = "",
         string $decryptionKey = "",
         array  $options = []
-    ): PromiseInterface {
-        $this->clientKey     = $clientKey;
-        $this->apiHost       = $apiHost;
+    ): PromiseInterface
+    {
+        $this->clientKey = $clientKey;
+        $this->apiHost = $apiHost;
         $this->decryptionKey = $decryptionKey;
 
         if (!$this->clientKey) {
@@ -944,16 +946,16 @@ class Growthbook implements LoggerAwareInterface
      * Synchronous version of fetching features
      *
      * @param array<string,mixed> $options {
-     *    @type bool $async
-     *    @type bool $skipCache
-     *    @type bool $staleWhileRevalidate
-     *    @type int  $timeout
+     * @type bool $async
+     * @type bool $skipCache
+     * @type bool $staleWhileRevalidate
+     * @type int $timeout
      * }
      */
     private function loadFeaturesSyncInternal(array $options): void
     {
-        $timeout             = $options['timeout'] ?? null;
-        $skipCache           = $options['skipCache'] ?? false;
+        $timeout = $options['timeout'] ?? null;
+        $skipCache = $options['skipCache'] ?? false;
         $staleWhileRevalidate = $options['staleWhileRevalidate'] ?? true;
 
         $url = rtrim($this->apiHost ?: self::DEFAULT_API_HOST, "/")
@@ -972,7 +974,7 @@ class Growthbook implements LoggerAwareInterface
                     if ($age < $this->cacheTTL) {
                         // Cache is fresh
                         $this->log(LogLevel::INFO, "Load features from cache (sync)", [
-                            "url"         => $url,
+                            "url" => $url,
                             "numFeatures" => count($features),
                         ]);
                         $this->withFeatures($features);
@@ -981,7 +983,7 @@ class Growthbook implements LoggerAwareInterface
                         // Cache is stale
                         if ($staleWhileRevalidate) {
                             $this->log(LogLevel::INFO, "Load stale features from cache, then revalidate (sync)", [
-                                "url"         => $url,
+                                "url" => $url,
                                 "numFeatures" => count($features),
                             ]);
                             $this->withFeatures($features);
@@ -1009,16 +1011,16 @@ class Growthbook implements LoggerAwareInterface
 
     /**
      * @param array<string,mixed> $options {
-     *    @type bool $async
-     *    @type bool $skipCache
-     *    @type bool $staleWhileRevalidate
-     *    @type int  $timeout
+     * @type bool $async
+     * @type bool $skipCache
+     * @type bool $staleWhileRevalidate
+     * @type int $timeout
      * }
      */
     private function loadFeaturesAsyncInternal(array $options): PromiseInterface
     {
-        $timeout             = $options['timeout'] ?? null;
-        $skipCache           = $options['skipCache'] ?? false;
+        $timeout = $options['timeout'] ?? null;
+        $skipCache = $options['skipCache'] ?? false;
         $staleWhileRevalidate = $options['staleWhileRevalidate'] ?? true;
 
         $url = rtrim($this->apiHost ?: self::DEFAULT_API_HOST, "/") . "/api/features/" . $this->clientKey;
@@ -1035,7 +1037,7 @@ class Growthbook implements LoggerAwareInterface
                     $age = $cachedTime ? ($now - (int)$cachedTime) : PHP_INT_MAX;
                     if ($age < $this->cacheTTL) {
                         $this->log(LogLevel::INFO, "Load features from cache (async)", [
-                            "url"         => $url,
+                            "url" => $url,
                             "numFeatures" => count($features),
                         ]);
                         $this->withFeatures($features);
@@ -1044,7 +1046,7 @@ class Growthbook implements LoggerAwareInterface
                     // If stale is allowed, serve stale & revalidate
                     if ($staleWhileRevalidate) {
                         $this->log(LogLevel::INFO, "Load stale features from cache, then revalidate (async)", [
-                            "url"         => $url,
+                            "url" => $url,
                             "numFeatures" => count($features),
                         ]);
                         $this->withFeatures($features);
@@ -1090,11 +1092,13 @@ class Growthbook implements LoggerAwareInterface
      */
     private function asyncFetchFeatures(string $url, ?int $timeout): PromiseInterface
     {
-        // This returns a promise from the React Browser
-        /** @var PromiseInterface $request */
-        $request = $this->asyncClient->get($url);
 
-        // If a timeout is set, wrap it in React\Promise\Timer\timeout
+        $request = $this->asyncClient->get($url);
+        if (!$request instanceof PromiseInterface) {
+            throw new RuntimeException("Expected a PromiseInterface from Browser->get()");
+        }
+
+        /** @phpstan-ignore-next-line */
         if ($timeout !== null && $timeout > 0) {
             $request = timeout($request, $timeout, $this->loop);
         }
@@ -1104,7 +1108,7 @@ class Growthbook implements LoggerAwareInterface
             $parsed = json_decode($body, true);
             if (!$parsed || !is_array($parsed) || !isset($parsed['features'])) {
                 $this->log(LogLevel::WARNING, "Could not load features (async)", [
-                    "url"          => $url,
+                    "url" => $url,
                     "responseBody" => $body
                 ]);
                 throw new RuntimeException("Invalid features response");
@@ -1114,7 +1118,7 @@ class Growthbook implements LoggerAwareInterface
                 : $parsed["features"];
 
             $this->log(LogLevel::INFO, "Async load features from URL", [
-                "url"         => $url,
+                "url" => $url,
                 "numFeatures" => count($features)
             ]);
             $this->withFeatures($features);
@@ -1141,12 +1145,10 @@ class Growthbook implements LoggerAwareInterface
         // If it's a PSR-18 client, we can do sendRequest()
         if ($this->httpClient instanceof ClientInterface) {
             $res = $this->httpClient->sendRequest($req);
-        }
-        // If it's React Browser, synchronous usage is not typical
+        } // If it's React Browser, synchronous usage is not typical
         elseif ($this->httpClient instanceof Browser) {
             throw new RuntimeException("Synchronous requests are not supported when using React\\Http\\Browser");
-        }
-        else {
+        } else {
             throw new RuntimeException("Unsupported HTTP client");
         }
 
@@ -1155,7 +1157,7 @@ class Growthbook implements LoggerAwareInterface
 
         if (!$parsed || !is_array($parsed) || !isset($parsed['features'])) {
             $this->log(LogLevel::WARNING, "Could not load features (sync)", [
-                "url"          => $url,
+                "url" => $url,
                 "responseBody" => $body,
             ]);
             return null;
@@ -1166,7 +1168,7 @@ class Growthbook implements LoggerAwareInterface
             : $parsed["features"];
 
         $this->log(LogLevel::INFO, "Load features from URL (sync)", [
-            "url"         => $url,
+            "url" => $url,
             "numFeatures" => count($features),
         ]);
         $this->withFeatures($features);
@@ -1186,7 +1188,7 @@ class Growthbook implements LoggerAwareInterface
             $success2 = $this->cache->set($cacheKey . '_time', time(), $this->cacheTTL);
             $this->log(LogLevel::INFO, "Cache features", [
                 "numFeatures" => count($features),
-                "ttl"         => $this->cacheTTL
+                "ttl" => $this->cacheTTL
             ]);
             return $success1 && $success2;
         }
