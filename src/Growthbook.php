@@ -34,7 +34,7 @@ class Growthbook implements LoggerAwareInterface
     /** @var bool */
     public $enabled = true;
 
-    /** @var null|LoggerInterface */
+    /** @var LoggerInterface|null */
     public $logger = null;
 
     /** @var string */
@@ -58,23 +58,21 @@ class Growthbook implements LoggerAwareInterface
     /** @var callable|null */
     private $trackingCallback = null;
 
-    /**
-     * @var null|CacheInterface
-     */
+    /** @var CacheInterface|null */
     private $cache = null;
 
     /** @var int */
     private $cacheTTL = 60;
 
     /**
-     * Since $httpClient can be either a PSR-18 ClientInterface or React\Http\Browser,
-     * we must handle synchronous and asynchronous requests differently.
+     * Because $httpClient can be either a PSR-18 ClientInterface or React\Http\Browser,
+     * we handle synchronous and asynchronous requests differently.
      *
      * @var ClientInterface|Browser|null
      */
     private $httpClient;
 
-    /** @var null|RequestFactoryInterface */
+    /** @var RequestFactoryInterface|null */
     public $requestFactory;
 
     /** @var string */
@@ -96,7 +94,7 @@ class Growthbook implements LoggerAwareInterface
     private $asyncClient;
 
     /**
-     * Non-generic typehint, since React\Promise\PromiseInterface is not a generic.
+     * Non-generic typehint, since React\Promise\PromiseInterface is not generic.
      *
      * @var PromiseInterface|null
      */
@@ -127,10 +125,8 @@ class Growthbook implements LoggerAwareInterface
      */
     public function __construct(array $options = [])
     {
-        /**
-         * We do not mark resolve(null) as "PromiseInterface<mixed>" in docblocks
-         * because React\Promise\PromiseInterface is not generic. Just use PromiseInterface.
-         */
+        // We do not mark resolve(null) as "PromiseInterface<mixed>" in docblocks
+        // because React\Promise\PromiseInterface is not generic.
         $this->promise = resolve(null);
 
         // Known config options for error-checking
@@ -556,7 +552,7 @@ class Growthbook implements LoggerAwareInterface
             $this->log(LogLevel::DEBUG, "Skip experiment because of empty attribute - $hashAttribute", [
                 "experiment" => $exp->key
             ]);
-            return new ExperimentResult($exp, $hashValue, -1, false, $featureId);
+            return new ExperimentResult($exp, "", -1, false, $featureId);
         }
 
         // 7. Filtered out
@@ -653,9 +649,9 @@ class Growthbook implements LoggerAwareInterface
     /**
      * @param string $level
      * @param string $message
-     * @param mixed $context
+     * @param array<mixed> $context
      */
-    public function log(string $level, string $message, $context = []): void
+    public function log(string $level, string $message, array $context = []): void
     {
         if ($this->logger) {
             $this->logger->log($level, $message, $context);
@@ -675,8 +671,9 @@ class Growthbook implements LoggerAwareInterface
         if ($version === 2) {
             $n = hexdec(hash("fnv1a32", hexdec(hash("fnv1a32", $seed . $value)) . ""));
             return ($n % 10000) / 10000;
-        } // Version 1 hashing
-        elseif ($version === 1) {
+        }
+        // Version 1 hashing
+        if ($version === 1) {
             $n = hexdec(hash("fnv1a32", $value . $seed));
             return ($n % 1000) / 1000;
         }
@@ -688,6 +685,7 @@ class Growthbook implements LoggerAwareInterface
      *
      * @param float $n
      * @param array{0:float,1:float} $range
+     * @return bool
      */
     public static function inRange(float $n, array $range): bool
     {
@@ -697,20 +695,20 @@ class Growthbook implements LoggerAwareInterface
     /**
      * Check if user is included in a rollout
      *
-     * @param string $seed
+     * @param string      $seed
      * @param string|null $hashAttribute
      * @param array{0:float,1:float}|null $range
-     * @param float|null $coverage
-     * @param int|null $hashVersion
+     * @param float|null  $coverage
+     * @param int|null    $hashVersion
+     * @return bool
      */
     private function isIncludedInRollout(
         string $seed,
-        string $hashAttribute = null,
-        array  $range = null,
-        float  $coverage = null,
-        int    $hashVersion = null
-    ): bool
-    {
+        ?string $hashAttribute,
+        ?array $range,
+        ?float $coverage,
+        ?int $hashVersion
+    ): bool {
         if ($coverage === null && $range === null) {
             return true;
         }
@@ -738,18 +736,21 @@ class Growthbook implements LoggerAwareInterface
     }
 
     /**
-     * @param array{
+     * @param array<array{
      *   seed:string,
-     *   ranges:array{0:float,1:float}[],
+     *   ranges:array<array{0:float,1:float}>,
      *   hashVersion?:int,
      *   attribute?:string
-     * }[] $filters
+     * }> $filters
+     * @return bool
      */
     private function isFilteredOut(array $filters): bool
     {
         foreach ($filters as $filter) {
             $hashValue = $this->getHashValue($filter["attribute"] ?? "id");
             if ($hashValue === "") {
+                // If there's no attribute to hash, can't filter user out,
+                // so the user is effectively included (return false).
                 return false;
             }
 
@@ -777,10 +778,10 @@ class Growthbook implements LoggerAwareInterface
      *
      * @param string $userId
      * @param array{0:string,1:float,2:float} $namespace
+     * @return bool
      */
     public static function inNamespace(string $userId, array $namespace): bool
     {
-        // @phpstan-ignore-next-line
         if (count($namespace) < 3) {
             return false;
         }
@@ -808,12 +809,12 @@ class Growthbook implements LoggerAwareInterface
     /**
      * Build bucket ranges for each variation
      *
-     * @param int $numVariations
-     * @param float $coverage
+     * @param int          $numVariations
+     * @param float        $coverage
      * @param float[]|null $weights
-     * @return array{0:float,1:float}[]
+     * @return array<array{0:float,1:float}>
      */
-    public static function getBucketRanges(int $numVariations, float $coverage, array $weights = null): array
+    public static function getBucketRanges(int $numVariations, float $coverage, ?array $weights = null): array
     {
         $coverage = max(0, min(1, $coverage));
         if (!$weights || count($weights) !== $numVariations) {
@@ -837,8 +838,8 @@ class Growthbook implements LoggerAwareInterface
     /**
      * Determine which variation a user is bucketed into
      *
-     * @param float $n
-     * @param array{0:float,1:float}[] $ranges
+     * @param float                             $n
+     * @param array<array{0:float,1:float}>     $ranges
      * @return int
      */
     public static function chooseVariation(float $n, array $ranges): int
@@ -856,7 +857,7 @@ class Growthbook implements LoggerAwareInterface
      *
      * @param string $id
      * @param string $url
-     * @param int $numVariations
+     * @param int    $numVariations
      * @return int|null
      */
     public static function getQueryStringOverride(string $id, string $url, int $numVariations): ?int
@@ -878,6 +879,9 @@ class Growthbook implements LoggerAwareInterface
 
     /**
      * Decrypt features from an encrypted string
+     *
+     * @param string $encryptedString
+     * @return string
      */
     public function decrypt(string $encryptedString): string
     {
@@ -900,21 +904,20 @@ class Growthbook implements LoggerAwareInterface
     /**
      * Load features (async or sync)
      *
-     * @param array<string,mixed> $options {
-     * @type bool $async
-     * @type bool $skipCache
-     * @type bool $staleWhileRevalidate
-     * @type int $timeout
-     * }
-     * @return PromiseInterface
+     * @param array{
+     *   async?: bool,
+     *   skipCache?: bool,
+     *   staleWhileRevalidate?: bool,
+     *   timeout?: int
+     * } $options
+     * @return PromiseInterface<mixed>
      */
     public function loadFeatures(
         string $clientKey,
         string $apiHost = "",
         string $decryptionKey = "",
         array  $options = []
-    ): PromiseInterface
-    {
+    ): PromiseInterface {
         $this->clientKey = $clientKey;
         $this->apiHost = $apiHost;
         $this->decryptionKey = $decryptionKey;
@@ -945,12 +948,12 @@ class Growthbook implements LoggerAwareInterface
     /**
      * Synchronous version of fetching features
      *
-     * @param array<string,mixed> $options {
-     * @type bool $async
-     * @type bool $skipCache
-     * @type bool $staleWhileRevalidate
-     * @type int $timeout
-     * }
+     * @param array{
+     *   async?: bool,
+     *   skipCache?: bool,
+     *   staleWhileRevalidate?: bool,
+     *   timeout?: int
+     * } $options
      */
     private function loadFeaturesSyncInternal(array $options): void
     {
@@ -1010,12 +1013,15 @@ class Growthbook implements LoggerAwareInterface
     }
 
     /**
-     * @param array<string,mixed> $options {
-     * @type bool $async
-     * @type bool $skipCache
-     * @type bool $staleWhileRevalidate
-     * @type int $timeout
-     * }
+     * Asynchronous version of fetching features
+     *
+     * @param array{
+     *   async?: bool,
+     *   skipCache?: bool,
+     *   staleWhileRevalidate?: bool,
+     *   timeout?: int
+     * } $options
+     * @return PromiseInterface<mixed>
      */
     private function loadFeaturesAsyncInternal(array $options): PromiseInterface
     {
@@ -1052,8 +1058,9 @@ class Growthbook implements LoggerAwareInterface
                         $this->withFeatures($features);
 
                         // Return a promise that tries to fetch fresh data
+                        /** @var PromiseInterface<array<string,mixed>> $updatePromise */
                         $updatePromise = $this->asyncFetchFeatures($url, $timeout)
-                            ->then(function ($fresh) use ($cacheKey) {
+                            ->then(function (array $fresh) use ($cacheKey) {
                                 $this->storeFeaturesInCache($fresh, $cacheKey);
                                 return $fresh;
                             })
@@ -1074,9 +1081,10 @@ class Growthbook implements LoggerAwareInterface
             }
         }
 
-        // No valid cache or skipCache=true: fetch from server
+        // No valid cache or skipCache=true => fetch from server
+        /** @var PromiseInterface<array<string,mixed>> $promise */
         $promise = $this->asyncFetchFeatures($url, $timeout)
-            ->then(function ($fresh) use ($cacheKey) {
+            ->then(function (array $fresh) use ($cacheKey) {
                 $this->storeFeaturesInCache($fresh, $cacheKey);
                 return $fresh;
             });
@@ -1085,21 +1093,20 @@ class Growthbook implements LoggerAwareInterface
 
     /**
      * Fetch features asynchronously with React\Http\Browser and optional timeout.
-     * Removed template T usage in docblocks, i.e., "PromiseInterface<ResponseInterface>"
-     * => just "PromiseInterface".
      *
-     * @return PromiseInterface
+     * @param string   $url
+     * @param int|null $timeout
+     * @return PromiseInterface<array<string,mixed>>
      */
     private function asyncFetchFeatures(string $url, ?int $timeout): PromiseInterface
     {
-
+        // Browser->get() returns a PromiseInterface<ResponseInterface>
+        /** @var PromiseInterface<ResponseInterface> $request */
         $request = $this->asyncClient->get($url);
-        if (!$request instanceof PromiseInterface) {
-            throw new RuntimeException("Expected a PromiseInterface from Browser->get()");
-        }
 
-        /** @phpstan-ignore-next-line */
+        // Wrap with timeout if needed
         if ($timeout !== null && $timeout > 0) {
+            /** @var PromiseInterface<ResponseInterface> $request */
             $request = timeout($request, $timeout, $this->loop);
         }
 
@@ -1122,13 +1129,15 @@ class Growthbook implements LoggerAwareInterface
                 "numFeatures" => count($features)
             ]);
             $this->withFeatures($features);
+
             return $features;
         });
     }
 
     /**
-     * Fetch features synchronously (PSR-18) or throw if Browser is used
+     * Fetch features synchronously (PSR-18) or throw if Browser is used.
      *
+     * @param string $url
      * @return array<string,mixed>|null
      */
     private function fetchFeaturesSync(string $url): ?array
@@ -1145,8 +1154,8 @@ class Growthbook implements LoggerAwareInterface
         // If it's a PSR-18 client, we can do sendRequest()
         if ($this->httpClient instanceof ClientInterface) {
             $res = $this->httpClient->sendRequest($req);
-        } // If it's React Browser, synchronous usage is not typical
-        elseif ($this->httpClient instanceof Browser) {
+        } elseif ($this->httpClient instanceof Browser) {
+            // If it's React Browser, synchronous usage is not typical
             throw new RuntimeException("Synchronous requests are not supported when using React\\Http\\Browser");
         } else {
             throw new RuntimeException("Unsupported HTTP client");
@@ -1179,6 +1188,7 @@ class Growthbook implements LoggerAwareInterface
      * Store fetched features in cache
      *
      * @param array<string,mixed> $features
+     * @param string              $cacheKey
      * @return bool
      */
     private function storeFeaturesInCache(array $features, string $cacheKey): bool
