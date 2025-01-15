@@ -1102,12 +1102,12 @@ class Growthbook implements LoggerAwareInterface
     private function asyncFetchFeatures(string $url, ?int $timeout): PromiseInterface
     {
         // Browser->get() returns a PromiseInterface<ResponseInterface>
-        /** @var PromiseInterface<ResponseInterface> $request */
+        /** @var PromiseInterface$request */
         $request = $this->asyncClient->get($url);
 
         // Wrap with timeout if needed
         if ($timeout !== null && $timeout > 0) {
-            /** @var PromiseInterface<ResponseInterface> $request */
+            /** @var PromiseInterface$request */
             $request = timeout($request, $timeout, $this->loop);
         }
 
