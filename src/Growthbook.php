@@ -782,6 +782,7 @@ class Growthbook implements LoggerAwareInterface
      */
     public static function inNamespace(string $userId, array $namespace): bool
     {
+        // @phpstan-ignore-next-line
         if (count($namespace) < 3) {
             return false;
         }
@@ -910,7 +911,7 @@ class Growthbook implements LoggerAwareInterface
      *   staleWhileRevalidate?: bool,
      *   timeout?: int
      * } $options
-     * @return PromiseInterface<mixed>
+     * @return PromiseInterface
      */
     public function loadFeatures(
         string $clientKey,
@@ -1021,7 +1022,7 @@ class Growthbook implements LoggerAwareInterface
      *   staleWhileRevalidate?: bool,
      *   timeout?: int
      * } $options
-     * @return PromiseInterface<mixed>
+     * @return PromiseInterface
      */
     private function loadFeaturesAsyncInternal(array $options): PromiseInterface
     {
@@ -1058,7 +1059,7 @@ class Growthbook implements LoggerAwareInterface
                         $this->withFeatures($features);
 
                         // Return a promise that tries to fetch fresh data
-                        /** @var PromiseInterface<array<string,mixed>> $updatePromise */
+                        /** @var PromiseInterface $updatePromise */
                         $updatePromise = $this->asyncFetchFeatures($url, $timeout)
                             ->then(function (array $fresh) use ($cacheKey) {
                                 $this->storeFeaturesInCache($fresh, $cacheKey);
@@ -1082,7 +1083,7 @@ class Growthbook implements LoggerAwareInterface
         }
 
         // No valid cache or skipCache=true => fetch from server
-        /** @var PromiseInterface<array<string,mixed>> $promise */
+        /** @var PromiseInterface $promise */
         $promise = $this->asyncFetchFeatures($url, $timeout)
             ->then(function (array $fresh) use ($cacheKey) {
                 $this->storeFeaturesInCache($fresh, $cacheKey);
@@ -1096,7 +1097,7 @@ class Growthbook implements LoggerAwareInterface
      *
      * @param string   $url
      * @param int|null $timeout
-     * @return PromiseInterface<array<string,mixed>>
+     * @return PromiseInterface
      */
     private function asyncFetchFeatures(string $url, ?int $timeout): PromiseInterface
     {
