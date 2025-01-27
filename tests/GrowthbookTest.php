@@ -2,6 +2,7 @@
 
 require_once __DIR__ . '/../vendor/autoload.php';
 
+use Psr\Log\LogLevel;
 use Growthbook\Condition;
 use Growthbook\FeatureResult;
 use Growthbook\Growthbook;
@@ -14,6 +15,8 @@ use Psr\SimpleCache\CacheInterface;
 use React\EventLoop\Factory;
 use React\Http\Browser;
 use React\Promise\Deferred;
+use Psr\Http\Message\RequestInterface;
+use Psr\Log\LoggerInterface;
 
 final class GrowthbookTest extends TestCase
 {
@@ -684,4 +687,211 @@ final class GrowthbookTest extends TestCase
         $this->assertFalse($gb->isOn('old-feature'), "Features updated after timer fired and async fetch completed");
     }
 
+    public function testLoadFeaturesWithValidCache(): void
+    {
+        $clientKey = 'testClientKey';
+        $apiHost = 'https://api.example.com';
+        $cacheKey = md5(rtrim($apiHost, "/") . "/api/features/" . $clientKey);
+
+        $features = ['feature1' => ['defaultValue' => true, 'rules' => []]];
+
+        $cacheMock = $this->createMock(CacheInterface::class);
+        $cacheMock->expects($this->exactly(2))
+            ->method('get')
+            ->withConsecutive(
+                [$cacheKey, null],
+                [$cacheKey . '_time', null]
+            )
+            ->willReturnOnConsecutiveCalls(
+                json_encode($features),
+                time()
+            );
+
+        $gb = Growthbook::create()
+            ->withCache($cacheMock)
+            ->withLogger($this->createMock(LoggerInterface::class));
+
+        $gb->loadFeatures($clientKey, $apiHost);
+
+        $actualFeatures = [];
+        foreach ($gb->getFeatures() as $key => $feature) {
+            $actualFeatures[$key] = [
+                'defaultValue' => $feature->defaultValue,
+                'rules' => $feature->rules
+            ];
+        }
+
+        $this->assertEquals($features, $actualFeatures);
+    }
+
+    public function testLoadFeaturesWithoutCredentialsButWithValidCache(): void
+    {
+        $clientKey = '';
+        $apiHost = '';
+        $cacheKey = md5(rtrim("https://cdn.growthbook.io", "/") . "/api/features/" . $clientKey);
+
+        // Added 'rules' => []
+        $features = ['feature1' => ['defaultValue' => true, 'rules' => []]];
+
+        $cacheMock = $this->createMock(CacheInterface::class);
+        $cacheMock->expects($this->exactly(2))
+            ->method('get')
+            ->withConsecutive(
+                [$cacheKey, null],
+                [$cacheKey . '_time', null]
+            )
+            ->willReturnOnConsecutiveCalls(
+                json_encode($features),
+                time()
+            );
+        $loggerMock = $this->createMock(LoggerInterface::class);
+        $loggerMock->expects($this->once())
+            ->method('log')
+            ->with(
+                $this->equalTo(LogLevel::INFO),
+                $this->stringContains('Load features from cache'),
+                $this->arrayHasKey('url')
+            );
+
+        $gb = Growthbook::create()
+            ->withCache($cacheMock)
+            ->withLogger($loggerMock);
+
+        $gb->loadFeatures($clientKey, $apiHost, '', ['timeout' => null, 'skipCache' => false, 'staleWhileRevalidate' => true]);
+
+        // Convert Feature objects to arrays for comparison
+        $actualFeatures = [];
+        foreach ($gb->getFeatures() as $key => $feature) {
+            $actualFeatures[$key] = [
+                'defaultValue' => $feature->defaultValue,
+                'rules' => $feature->rules
+            ];
+        }
+
+        $this->assertEquals($features, $actualFeatures);
+    }
+
+    public function testLoadFeaturesWithoutCacheAndMissingCredentials(): void
+    {
+        $loggerMock = $this->createMock(LoggerInterface::class);
+        $loggerMock->expects($this->once())
+            ->method('log')
+            ->with(
+                $this->equalTo(LogLevel::WARNING),
+                $this->stringContains('Missing clientKey, unable to load features from API'),
+                $this->anything() // Do not check for 'url' key
+            );
+
+        $gb = Growthbook::create()
+            ->withLogger($loggerMock);
+
+        $gb->loadFeatures();
+
+        $this->assertEmpty($gb->getFeatures());
+    }
+
+    public function testLoadFeaturesWithConnectionIssueAndValidCache(): void
+    {
+        $clientKey = 'testClientKey';
+        $apiHost = 'https://api.example.com';
+        $cacheKey = md5(rtrim($apiHost, "/") . "/api/features/" . $clientKey);
+
+        $features = ['feature1' => ['defaultValue' => true, 'rules' => []]];
+
+        // Adjust cached data to match the expected format
+        $cachedData = $features; // Store without 'features' key
+
+        $cacheMock = $this->createMock(CacheInterface::class);
+        $cacheMock->expects($this->exactly(3))
+            ->method('get')
+            ->withConsecutive(
+                [$cacheKey],
+                [$cacheKey.'_time'],
+                [$cacheKey]
+            )
+            ->willReturnOnConsecutiveCalls(
+                null, time() - 120, // First attempt - cache missing or expired
+                json_encode($cachedData) // Second attempt - cache with data (possibly stale)
+            );
+
+
+        $httpClientMock = $this->createMock(ClientInterface::class);
+        $httpClientMock->expects($this->once())
+            ->method('sendRequest')
+            ->willThrowException(new \Exception("Connection error"));
+
+        $requestFactoryMock = $this->createMock(RequestFactoryInterface::class);
+        $requestFactoryMock->expects($this->once())
+            ->method('createRequest')
+            ->with('GET', rtrim($apiHost, "/") . "/api/features/" . $clientKey)
+            ->willReturn($this->createMock(RequestInterface::class));
+
+        $loggerMock = $this->createMock(LoggerInterface::class);
+        $loggerMock->expects($this->exactly(2))
+            ->method('log')
+            ->withConsecutive(
+                [
+                    $this->equalTo(LogLevel::ERROR), // Expect 'error' level
+                    $this->stringContains('Exception while loading features from API'),
+                    $this->arrayHasKey('exception')
+                ],
+                [
+                    $this->equalTo(LogLevel::WARNING),
+                    $this->stringContains('Using possibly stale features from cache due to exception'),
+                    $this->arrayHasKey('url')
+                ]
+            );
+
+        $gb = Growthbook::create()
+            ->withCache($cacheMock)
+            ->withHttpClient($httpClientMock, $requestFactoryMock)
+            ->withLogger($loggerMock);
+
+        $gb->loadFeatures($clientKey, $apiHost);
+
+        // Convert Feature objects to arrays for comparison
+        $actualFeatures = [];
+        foreach ($gb->getFeatures() as $key => $feature) {
+            $actualFeatures[$key] = [
+                'defaultValue' => $feature->defaultValue,
+                'rules' => $feature->rules
+            ];
+        }
+
+        $this->assertEquals($features, $actualFeatures);
+    }
+
+    public function testLoadFeaturesWithConnectionIssueAndNoCache(): void
+    {
+        $clientKey = 'testClientKey';
+        $apiHost = 'https://api.example.com';
+
+        $httpClientMock = $this->createMock(ClientInterface::class);
+        $httpClientMock->expects($this->once())
+            ->method('sendRequest')
+            ->willThrowException(new \Exception("Connection error"));
+
+        $requestFactoryMock = $this->createMock(RequestFactoryInterface::class);
+        $requestFactoryMock->expects($this->once())
+            ->method('createRequest')
+            ->with('GET', rtrim($apiHost, "/") . "/api/features/" . $clientKey)
+            ->willReturn($this->createMock(RequestInterface::class));
+
+        $loggerMock = $this->createMock(LoggerInterface::class);
+        $loggerMock->expects($this->once())
+            ->method('log')
+            ->with(
+                $this->equalTo(LogLevel::ERROR),
+                $this->stringContains('Exception while loading features from API'),
+                $this->arrayHasKey('exception')
+            );
+
+        $gb = Growthbook::create()
+            ->withHttpClient($httpClientMock, $requestFactoryMock)
+            ->withLogger($loggerMock);
+
+        $gb->loadFeatures($clientKey, $apiHost);
+
+        $this->assertEmpty($gb->getFeatures());
+    }
 }
