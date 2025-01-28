@@ -640,14 +640,16 @@ final class GrowthbookTest extends TestCase
         ]);
         $this->assertInstanceOf(PromiseInterface::class, $gb->promise);
 
-        $gb->promise->then(
-            function (array $features) {
-                $this->assertIsArray($features, "Async features must be an array");
-            },
-            function (Throwable $e) {
-                $this->fail("Async fetch failed: " . $e->getMessage());
-            }
-        );
+        if ($gb->promise instanceof PromiseInterface) {
+            $gb->promise->then(
+                function (array $features) {
+                    $this->assertIsArray($features, "Async features must be an array");
+                },
+                function (Throwable $e) {
+                    $this->fail("Async fetch failed: " . $e->getMessage());
+                }
+            );
+        }
         $loop->run();
 
         $this->assertTrue(true, "Async loadFeatures completed successfully");

@@ -96,7 +96,7 @@ class Growthbook implements LoggerAwareInterface
     /**
      * Non-generic typehint, since React\Promise\PromiseInterface is not generic.
      *
-     * @var PromiseInterface|null
+     * @var PromiseInterface<mixed>|null
      */
     public $promise;
 
@@ -911,7 +911,7 @@ class Growthbook implements LoggerAwareInterface
      *   staleWhileRevalidate?: bool,
      *   timeout?: int
      * } $options
-     * @return PromiseInterface
+     * @return PromiseInterface<mixed>
      */
     public function loadFeatures(
         string $clientKey,
@@ -1022,7 +1022,7 @@ class Growthbook implements LoggerAwareInterface
      *   staleWhileRevalidate?: bool,
      *   timeout?: int
      * } $options
-     * @return PromiseInterface
+     * @return PromiseInterface<mixed>
      */
     private function loadFeaturesAsyncInternal(array $options): PromiseInterface
     {
@@ -1059,7 +1059,7 @@ class Growthbook implements LoggerAwareInterface
                         $this->withFeatures($features);
 
                         // Return a promise that tries to fetch fresh data
-                        /** @var PromiseInterface $updatePromise */
+                        /** @var PromiseInterface<array<string,mixed>> $updatePromise */
                         $updatePromise = $this->asyncFetchFeatures($url, $timeout)
                             ->then(function (array $fresh) use ($cacheKey) {
                                 $this->storeFeaturesInCache($fresh, $cacheKey);
@@ -1073,6 +1073,11 @@ class Growthbook implements LoggerAwareInterface
                                     ]);
                                     return $this->features;
                                 }
+                            )->otherwise(
+                                function (Throwable $e) {
+                                    $this->log(LogLevel::ERROR, "Async fetch failed: " . $e->getMessage());
+                                    throw $e;
+                                }
                             );
                         return $updatePromise;
                     }
@@ -1083,7 +1088,7 @@ class Growthbook implements LoggerAwareInterface
         }
 
         // No valid cache or skipCache=true => fetch from server
-        /** @var PromiseInterface $promise */
+        /** @var PromiseInterface<array<string,mixed>> $promise */
         $promise = $this->asyncFetchFeatures($url, $timeout)
             ->then(function (array $fresh) use ($cacheKey) {
                 $this->storeFeaturesInCache($fresh, $cacheKey);
@@ -1097,17 +1102,17 @@ class Growthbook implements LoggerAwareInterface
      *
      * @param string   $url
      * @param int|null $timeout
-     * @return PromiseInterface
+     * @return PromiseInterface<array<string,mixed>>
      */
     private function asyncFetchFeatures(string $url, ?int $timeout): PromiseInterface
     {
         // Browser->get() returns a PromiseInterface<ResponseInterface>
-        /** @var PromiseInterface$request */
+        /** @var PromiseInterface<ResponseInterface> $request */
         $request = $this->asyncClient->get($url);
 
         // Wrap with timeout if needed
         if ($timeout !== null && $timeout > 0) {
-            /** @var PromiseInterface$request */
+            /** @var PromiseInterface<ResponseInterface> $request */
             $request = timeout($request, $timeout, $this->loop);
         }
 
