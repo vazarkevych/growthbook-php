@@ -3,7 +3,7 @@
     "description": "PHP SDK for GrowthBook, the feature flagging and A/B testing platform",
     "type": "library",
     "require": {
-        "psr/log": "^1.0|^2.0|^3.0",
+        "psr/log": "^3.0",
         "psr/simple-cache": "^1.0|^2.0|^3.0",
         "psr/http-client": "^1.0",
         "psr/http-factory": "^1.0",
@@ -29,10 +29,10 @@
         "fix": "php-cs-fixer fix src && php-cs-fixer fix tests"
     },
     "autoload": {
-		"psr-4": {
-			"Growthbook\\": "src/"
-		}
-	},
+        "psr-4": {
+            "Growthbook\\": "src/"
+        }
+    },
     "config": {
         "allow-plugins": {
             "php-http/discovery": true

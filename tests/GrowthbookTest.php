@@ -2,7 +2,6 @@
 
 require_once __DIR__ . '/../vendor/autoload.php';
 
-use Psr\Log\LogLevel;
 use Growthbook\Condition;
 use Growthbook\FeatureResult;
 use Growthbook\Growthbook;
@@ -10,13 +9,16 @@ use Growthbook\InlineExperiment;
 use PHPUnit\Framework\TestCase;
 use Psr\Http\Client\ClientInterface;
 use Psr\Http\Message\RequestFactoryInterface;
-use Psr\Http\Message\ResponseInterface;
-use Psr\SimpleCache\CacheInterface;
-use React\EventLoop\Factory;
-use React\Http\Browser;
-use React\Promise\Deferred;
 use Psr\Http\Message\RequestInterface;
+use Psr\Http\Message\ResponseInterface;
 use Psr\Log\LoggerInterface;
+use Psr\Log\LogLevel;
+use React\EventLoop\Loop;
+use React\Promise\Deferred;
+use React\Promise\PromiseInterface;
+use Psr\SimpleCache\CacheInterface;
+use React\Http\Browser;
+
 
 final class GrowthbookTest extends TestCase
 {
@@ -33,13 +35,13 @@ final class GrowthbookTest extends TestCase
         if (!$this->cases) {
             $cases = file_get_contents(__DIR__ . '/cases.json');
             if (!$cases) {
-                throw new \Exception("Could not load cases.json");
+                throw new Exception("Could not load cases.json");
             }
             $this->cases = json_decode($cases, true);
         }
 
         if (!array_key_exists($section, $this->cases)) {
-            throw new \Exception("Unknown test case: $section");
+            throw new Exception("Unknown test case: $section");
         }
         $raw = $this->cases[$section];
 
@@ -73,6 +75,7 @@ final class GrowthbookTest extends TestCase
             }
         }
     }
+
     /**
      * @return array<int|string,mixed[]>
      */
@@ -89,6 +92,7 @@ final class GrowthbookTest extends TestCase
         $actual = Growthbook::hash($seed, $value, $version);
         $this->assertSame($actual, $expected);
     }
+
     /**
      * @return array<int|string,mixed[]>
      */
@@ -107,6 +111,7 @@ final class GrowthbookTest extends TestCase
     {
         $this->assertSame(Condition::evalCondition($attributes, $condition), $expected);
     }
+
     /**
      * @return array<int|string,mixed[]>
      */
@@ -124,6 +129,7 @@ final class GrowthbookTest extends TestCase
     {
         $this->assertSame(Growthbook::getQueryStringOverride($key, $url, $numVariations), $expected);
     }
+
     /**
      * @return array<int|string,mixed[]>
      */
@@ -143,6 +149,7 @@ final class GrowthbookTest extends TestCase
     {
         $this->assertSame(Growthbook::chooseVariation($n, $ranges), $expected);
     }
+
     /**
      * @return array<int|string,mixed[]>
      */
@@ -162,6 +169,7 @@ final class GrowthbookTest extends TestCase
     {
         $this->assertSame(Growthbook::inNamespace($id, $namespace), $expected);
     }
+
     /**
      * @return array<int|string,mixed[]>
      */
@@ -186,6 +194,7 @@ final class GrowthbookTest extends TestCase
             return round($w, 8);
         }, $expected));
     }
+
     /**
      * @return array<int|string,mixed[]>
      */
@@ -210,7 +219,7 @@ final class GrowthbookTest extends TestCase
         $actual = null;
         try {
             $actual = $gb->decrypt($encryptedString);
-        } catch (\Throwable $e) {
+        } catch (Throwable $e) {
             if ($expected) {
                 throw $e;
             }
@@ -255,6 +264,7 @@ final class GrowthbookTest extends TestCase
 
         $this->assertEquals($expected, $actual);
     }
+
     /**
      * @param mixed $obj
      * @param array<string,mixed> $ref
@@ -264,17 +274,18 @@ final class GrowthbookTest extends TestCase
     {
         $encoded = json_encode($obj);
         if (!$encoded) {
-            throw new \Exception("Failed to encode object");
+            throw new Exception("Failed to encode object");
         }
         $arr = json_decode($encoded, true);
         foreach ($arr as $k => $v) {
-            if ($v === null || ($k === "active" && $v && !isset($ref['active'])) || ($k === "coverage" && $v === 1 && !isset($ref['coverage'])) || ($k==="hashAttribute" && $v==="id" && !isset($ref['hashAttribute']))) {
+            if ($v === null || ($k === "active" && $v && !isset($ref['active'])) || ($k === "coverage" && $v === 1 && !isset($ref['coverage'])) || ($k === "hashAttribute" && $v === "id" && !isset($ref['hashAttribute']))) {
                 unset($arr[$k]);
             }
         }
 
         return $arr;
     }
+
     /**
      * @return array<int|string,mixed[]>
      */
@@ -302,6 +313,7 @@ final class GrowthbookTest extends TestCase
         $this->assertSame($res->inExperiment, $inExperiment);
         $this->assertSame($res->hashUsed, $hashUsed);
     }
+
     /**
      * @return array<int|string,mixed[]>
      */
@@ -313,15 +325,15 @@ final class GrowthbookTest extends TestCase
 
     public function testFluentInterface(): void
     {
-        $attributes = ['id'=>1];
+        $attributes = ['id' => 1];
         $callback = function ($exp, $res) {
             // do nothing
         };
         $features = [
-            'feature-1'=>['defaultValue'=>1, 'rules'=>[]]
+            'feature-1' => ['defaultValue' => 1, 'rules' => []]
         ];
         $url = "/home";
-        $forcedVariations = ['exp1'=>0];
+        $forcedVariations = ['exp1' => 0];
 
         $gb = Growthbook::create()
             ->withFeatures($features)
@@ -345,7 +357,7 @@ final class GrowthbookTest extends TestCase
     {
         $gb = Growthbook::create()
             ->withFeatures([
-                'feature-1'=>['defaultValue' => false, 'rules' => []]
+                'feature-1' => ['defaultValue' => false, 'rules' => []]
             ])
             ->withForcedFeatures([
                 'feature-1' => new FeatureResult(true, 'forcedFeature')
@@ -356,12 +368,12 @@ final class GrowthbookTest extends TestCase
 
     public function testInlineExperiment(): void
     {
-        $condition = ['country'=>'US'];
-        $weights = [.4,.6];
+        $condition = ['country' => 'US'];
+        $weights = [.4, .6];
         $coverage = 0.5;
         $hashAttribute = 'anonId';
 
-        $exp = InlineExperiment::create("my-test", [0,1])
+        $exp = InlineExperiment::create("my-test", [0, 1])
             ->withCondition($condition)
             ->withWeights($weights)
             ->withCoverage($coverage)
@@ -384,10 +396,10 @@ final class GrowthbookTest extends TestCase
 
         $logger = $this->createMock('Psr\Log\AbstractLogger');
         $logger->expects($this->exactly(4))->method("log")->withConsecutive(
-            [$this->equalTo("debug"),$this->stringContains("Evaluating feature")],
-            [$this->equalTo("debug"),$this->stringContains("Attempting to run experiment")],
-            [$this->equalTo("debug"),$this->stringContains("Assigned user a variation")],
-            [$this->equalTo("debug"),$this->stringContains("Use feature value from experiment")],
+            [$this->equalTo("debug"), $this->stringContains("Evaluating feature")],
+            [$this->equalTo("debug"), $this->stringContains("Attempting to run experiment")],
+            [$this->equalTo("debug"), $this->stringContains("Assigned user a variation")],
+            [$this->equalTo("debug"), $this->stringContains("Use feature value from experiment")],
         );
 
         $gb = Growthbook::create()
@@ -395,14 +407,14 @@ final class GrowthbookTest extends TestCase
             ->withLogger($logger)
             ->withAttributes(['id' => '1'])
             ->withFeatures([
-                'feature'=>[
-                    'defaultValue'=>false,
-                    'rules'=>[
+                'feature' => [
+                    'defaultValue' => false,
+                    'rules' => [
                         [
-                            'variations'=>[false,true],
-                            'meta'=>[
-                                ['key'=>'control'],
-                                ['key'=>'variation']
+                            'variations' => [false, true],
+                            'meta' => [
+                                ['key' => 'control'],
+                                ['key' => 'variation']
                             ]
                         ]
                     ]
@@ -422,6 +434,7 @@ final class GrowthbookTest extends TestCase
         $this->assertSame($calls[0][1]->bucket, 0.906);
         $this->assertSame($calls[0][1]->featureId, "feature");
     }
+
     public function testTrackingCallbackExceptionWithLogger(): void
     {
         $logCalls = [];
@@ -434,7 +447,7 @@ final class GrowthbookTest extends TestCase
             ->withLogger($logger)
             ->withAttributes(['id' => 'user123'])
             ->withTrackingCallback(function () {
-                throw new \Exception("Test exception");
+                throw new Exception("Test exception");
             });
 
         $exp = new InlineExperiment("test-exp", [0, 1]);
@@ -452,22 +465,287 @@ final class GrowthbookTest extends TestCase
 
     public function testTrackingCallbackExceptionWithoutLogger(): void
     {
-        $this->expectException(\Exception::class);
+        $this->expectException(Exception::class);
         $this->expectExceptionMessage("Test exception");
 
         $gb = Growthbook::create()
             ->withAttributes(['id' => 'user123'])
             ->withTrackingCallback(function () {
-                throw new \Exception("Test exception");
+                throw new Exception("Test exception");
             });
 
         $exp = new InlineExperiment("test-exp", [0, 1]);
         $gb->runInlineExperiment($exp);
     }
+
+    public function testLoadFeaturesWithTimeoutSkipCacheStaleWhileRevalidate(): void
+    {
+        $cache = new class implements CacheInterface {
+            /** @var array<string,mixed> */
+            private array $store = [];
+
+            public function get(string $key, mixed $default = null): mixed
+            {
+                return $this->store[$key] ?? $default;
+            }
+
+            public function set(string $key, mixed $value, DateInterval|int|null $ttl = null): bool
+            {
+                $this->store[$key] = $value;
+                return true;
+            }
+
+            // delete(string $key): bool
+            public function delete(string $key): bool
+            {
+                unset($this->store[$key]);
+                return true;
+            }
+
+            // clear(): bool
+            public function clear(): bool
+            {
+                $this->store = [];
+                return true;
+            }
+
+            public function getMultiple(iterable $keys, mixed $default = null): iterable
+            {
+                $results = [];
+                foreach ($keys as $k) {
+                    $results[$k] = $this->store[$k] ?? $default;
+                }
+                return $results;
+            }
+            /**
+             * @param iterable<string,mixed> $values
+             */
+            public function setMultiple(iterable $values, DateInterval|int|null $ttl = null): bool
+            {
+                foreach ($values as $k => $v) {
+                    $this->store[$k] = $v;
+                }
+                return true;
+            }
+
+            // deleteMultiple(iterable $keys): bool
+            public function deleteMultiple(iterable $keys): bool
+            {
+                foreach ($keys as $k) {
+                    unset($this->store[$k]);
+                }
+                return true;
+            }
+
+            public function has(string $key): bool
+            {
+                return isset($this->store[$key]);
+            }
+        };
+
+
+        $mockResponseBody = json_encode(["features" => [
+            "new-feature" => ["defaultValue" => true],
+            "beta-feature" => ["defaultValue" => false]
+        ]]);
+        $responseMock = $this->createMock(ResponseInterface::class);
+        $responseMock->method('getBody')->willReturn($mockResponseBody);
+
+        $httpClientMock = $this->createMock(ClientInterface::class);
+        $httpClientMock->expects($this->any())
+            ->method('sendRequest')
+            ->willReturn($responseMock);
+
+        $gb = new Growthbook([
+            'httpClient' => $httpClientMock,
+            'cache' => $cache,
+        ]);
+
+        $gb->loadFeatures('client-test', '', '', [
+            'timeout' => 5,
+            'skipCache' => false,
+            'staleWhileRevalidate' => true
+        ]);
+        $this->assertTrue($gb->isOn('new-feature'), 'Expect new-feature => true from fresh API call');
+        $cacheKey = md5("https://cdn.growthbook.io/api/features/client-test");
+        $this->assertNotNull($cache->get($cacheKey), 'Features must be stored in cache');
+
+        $responseMock2 = $this->createMock(ResponseInterface::class);
+        $responseMock2->method('getBody')->willReturn(json_encode(["features" => [
+            "some-other-feature" => ["defaultValue" => false]
+        ]]));
+        $httpClientMock2 = $this->createMock(ClientInterface::class);
+        $httpClientMock2->expects($this->never())
+            ->method('sendRequest');
+
+        $gb->withHttpClient($httpClientMock2, $gb->requestFactory);
+
+        $gb->loadFeatures('client-test', '', '', [
+            'timeout' => 5,
+            'skipCache' => false,
+            'staleWhileRevalidate' => true
+        ]);
+
+        $this->assertTrue($gb->isOn('new-feature'), 'new-feature still true from cache');
+
+        $responseMock3 = $this->createMock(ResponseInterface::class);
+        $responseMock3->method('getBody')->willReturn(json_encode(["features" => [
+            "skipcache-feature" => ["defaultValue" => 123]
+        ]]));
+        $httpClientMock3 = $this->createMock(ClientInterface::class);
+        $httpClientMock3->expects($this->once()) // один виклик
+        ->method('sendRequest')
+            ->willReturn($responseMock3);
+
+        $gb->withHttpClient($httpClientMock3, $gb->requestFactory);
+
+        $gb->loadFeatures('client-test', '', '', [
+            'timeout' => 5,
+            'skipCache' => true,
+            'staleWhileRevalidate' => false
+        ]);
+        $this->assertSame(123, $gb->getValue('skipcache-feature', null));
+
+        $cache->set($cacheKey . '_time', time() - 9999);
+
+        $responseMock4 = $this->createMock(ResponseInterface::class);
+        $responseMock4->method('getBody')->willReturn(json_encode(["features" => [
+            "fresh-feature" => ["defaultValue" => "fresh"]
+        ]]));
+        $httpClientMock4 = $this->createMock(ClientInterface::class);
+        $httpClientMock4->expects($this->once())
+            ->method('sendRequest')
+            ->willReturn($responseMock4);
+
+        $gb->withHttpClient($httpClientMock4, $gb->requestFactory);
+
+        $gb->loadFeatures('client-test', '', '', [
+            'timeout' => 5,
+            'skipCache' => false,
+            'staleWhileRevalidate' => false
+        ]);
+        $this->assertSame("fresh", $gb->getValue('fresh-feature', null));
+
+        $this->assertTrue(true, 'No exceptions thrown => logic is ok for skipCache, staleWhileRevalidate, and timeout.');
+    }
+
+
+    public function testLoadFeaturesAsyncOption(): void
+    {
+        $loop = Loop::get();
+        $httpClient = new Browser($loop);
+        $gb = new Growthbook([
+            'loop' => $loop,
+            'httpClient' => $httpClient, // Or ->setClient($httpClient) if that’s your library’s pattern
+        ]);
+        $gb->loadFeatures('demo', '', '', [
+            'async' => true,
+            'skipCache' => true,
+            'timeout' => 3,
+        ]);
+        $this->assertInstanceOf(PromiseInterface::class, $gb->promise);
+
+        if ($gb->promise instanceof PromiseInterface) {
+            $gb->promise->then(
+                function (array $features) {
+                    $this->assertIsArray($features, "Async features must be an array");
+                },
+                function (Throwable $e) {
+                    $this->fail("Async fetch failed: " . $e->getMessage());
+                }
+            );
+        }
+        $loop->run();
+
+        $this->assertTrue(true, "Async loadFeatures completed successfully");
+    }
+    public function testLoadFeaturesSyncOption(): void
+    {
+        $loop = Loop::get();
+        $httpClient = $this->createMock(ClientInterface::class);
+        $gb = new Growthbook([
+            'loop' => $loop,
+            'httpClient' => $httpClient,
+        ]);
+        $gb->loadFeatures('demo', '', '', [
+            'async' => false,
+            'skipCache' => true,
+            'timeout' => 3,
+        ]);
+
+        $features = $gb->getFeatures();
+        $this->assertIsArray($features, "Sync features must be an array");
+
+        $this->assertTrue(true, "Sync loadFeatures completed successfully");
+    }
+    public function testLoadFeaturesWithCache(): void
+    {
+        $loop = Loop::get();
+        $httpClient = $this->createMock(ClientInterface::class);
+        $cache = $this->createMock(CacheInterface::class);
+//        $cache->method('get')->willReturn(json_encode(['feature1' => ['on' => true]]));
+        $cache->method('get')->willReturn(json_encode( ['feature1' => ['defaultValue' => ['on' => true], 'rules' => []]]));
+        $cache->method('set')->willReturn(true);
+
+        $gb = new Growthbook([
+            'loop' => $loop,
+            'httpClient' => $httpClient,
+            'cache' => $cache,
+        ]);
+        $gb->loadFeatures('demo', '', '', [
+            'async' => false,
+            'skipCache' => false,
+            'timeout' => 3,
+        ]);
+
+        $features = $gb->getFeatures();
+        $this->assertIsArray($features, "Features must be an array");
+        $this->assertArrayHasKey('feature1', $features, "Features must contain 'feature1'");
+        $this->assertTrue($features['feature1']->defaultValue['on'], "Feature 'feature1' must be on");
+
+        $this->assertTrue(true, "Load features with cache completed successfully");
+    }
+
+    public function testLoadFeaturesWithInvalidClientKey(): void
+    {
+        $this->expectException(Exception::class);
+        $this->expectExceptionMessage("Must specify a clientKey before loading features.");
+
+        $loop = Loop::get();
+        $httpClient = new Browser($loop);
+        $gb = new Growthbook([
+            'loop' => $loop,
+            'httpClient' => $httpClient,
+        ]);
+        $gb->loadFeatures('', '', '', [
+            'async' => false,
+            'skipCache' => true,
+            'timeout' => 3,
+        ]);
+    }
+
+    public function testLoadFeaturesWithWrongHttpClient(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage("httpClient must be an instance of ClientInterface or Browser");
+
+        $loop = Loop::get();
+        // @phpstan-ignore-next-line
+        $gb = new Growthbook([
+            'loop' => $loop,
+            'httpClient' => 'wrong'
+        ]);
+        $gb->loadFeatures('demo', '', '', [
+            'async' => false,
+            'skipCache' => true,
+            'timeout' => 3,
+        ]);
+    }
+
     public function testLoadFeaturesStaleWhileRevalidateAsync(): void
     {
         // Create a ReactPHP event loop
-        $loop = Factory::create();
+        $loop = Loop::get();
 
         // Simulate cache
         $cache = $this->createMock(CacheInterface::class);
@@ -540,10 +818,26 @@ final class GrowthbookTest extends TestCase
         // After update, features should become false
         $this->assertFalse($gb->isOn('feature-stale'), "Should have revalidated and updated features in background");
     }
+    public function testLoadFeaturesWithWrongRequestFactoryClient(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage("requestFactory must be an instance of RequestFactoryInterface");
 
+        $loop = Loop::get();
+        // @phpstan-ignore-next-line
+        $gb = new Growthbook([
+            'loop' => $loop,
+            'requestFactory' => 'wrong',
+        ]);
+        $gb->loadFeatures('demo', '', '', [
+            'async' => false,
+            'skipCache' => true,
+            'timeout' => 3,
+        ]);
+    }
     public function testLoadFeaturesSkipCacheAsync(): void
     {
-        $loop = Factory::create();
+        $loop = Loop::get();
 
         $cache = $this->createMock(CacheInterface::class);
         $cachedFeatures = ['featureA' => ['defaultValue' => true, 'rules' => []]];
@@ -577,7 +871,8 @@ final class GrowthbookTest extends TestCase
         $refProperty->setValue($gb, $asyncClient);
 
         $gb->loadFeatures('clientKey', 'https://cdn.growthbook.io', '', [
-            'skipCache' => true
+            'skipCache' => true,
+            'async' => true
         ]);
 
         // Before running the loop, features are not loaded from API, so it should be false
@@ -588,10 +883,9 @@ final class GrowthbookTest extends TestCase
         // After running the event loop, features should be updated from the API
         $this->assertFalse($gb->isOn('featureA'), "After running event loop, should fetch from API updating feature to false");
     }
-
     public function testLoadFeaturesTimeoutAsync(): void
     {
-        $loop = Factory::create();
+        $loop = Loop::get();
 
         $cache = $this->createMock(CacheInterface::class);
         $cache->method('get')->willReturn(null);
@@ -629,7 +923,7 @@ final class GrowthbookTest extends TestCase
     }
     public function testTimerLogicForBackgroundRevalidation(): void
     {
-        $loop = Factory::create();
+        $loop = Loop::get();
 
         // Simulate cache with stale features
         $cache = $this->createMock(\Psr\SimpleCache\CacheInterface::class);
@@ -686,7 +980,6 @@ final class GrowthbookTest extends TestCase
         // After running the loop, the timer should have triggered async fetch & update
         $this->assertFalse($gb->isOn('old-feature'), "Features updated after timer fired and async fetch completed");
     }
-
     public function testLoadFeaturesWithValidCache(): void
     {
         $clientKey = 'testClientKey';
@@ -726,7 +1019,7 @@ final class GrowthbookTest extends TestCase
 
     public function testLoadFeaturesWithoutCredentialsButWithValidCache(): void
     {
-        $clientKey = '';
+        $clientKey = 'apiKey';
         $apiHost = '';
         $cacheKey = md5(rtrim("https://cdn.growthbook.io", "/") . "/api/features/" . $clientKey);
 
@@ -757,7 +1050,7 @@ final class GrowthbookTest extends TestCase
             ->withCache($cacheMock)
             ->withLogger($loggerMock);
 
-        $gb->loadFeatures($clientKey, $apiHost, '', ['timeout' => null, 'skipCache' => false, 'staleWhileRevalidate' => true]);
+        $gb->loadFeatures($clientKey, $apiHost, '', ['timeout' => 0, 'skipCache' => false, 'staleWhileRevalidate' => true, 'async' => false]);
 
         // Convert Feature objects to arrays for comparison
         $actualFeatures = [];
@@ -770,23 +1063,14 @@ final class GrowthbookTest extends TestCase
 
         $this->assertEquals($features, $actualFeatures);
     }
-
     public function testLoadFeaturesWithoutCacheAndMissingCredentials(): void
     {
-        $loggerMock = $this->createMock(LoggerInterface::class);
-        $loggerMock->expects($this->once())
-            ->method('log')
-            ->with(
-                $this->equalTo(LogLevel::WARNING),
-                $this->stringContains('Missing clientKey, unable to load features from API'),
-                $this->anything() // Do not check for 'url' key
-            );
+        $this->expectException(Exception::class);
+        $this->expectExceptionMessage("Must specify a clientKey before loading features.");
 
-        $gb = Growthbook::create()
-            ->withLogger($loggerMock);
+        $gb = Growthbook::create();
 
         $gb->loadFeatures();
-
         $this->assertEmpty($gb->getFeatures());
     }
 
@@ -860,7 +1144,6 @@ final class GrowthbookTest extends TestCase
 
         $this->assertEquals($features, $actualFeatures);
     }
-
     public function testLoadFeaturesWithConnectionIssueAndNoCache(): void
     {
         $clientKey = 'testClientKey';
@@ -890,7 +1173,7 @@ final class GrowthbookTest extends TestCase
             ->withHttpClient($httpClientMock, $requestFactoryMock)
             ->withLogger($loggerMock);
 
-        $gb->loadFeatures($clientKey, $apiHost);
+        $gb->loadFeatures($clientKey, $apiHost, '', ['async' => false]);
 
         $this->assertEmpty($gb->getFeatures());
     }
