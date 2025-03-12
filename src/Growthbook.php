@@ -288,6 +288,7 @@ class Growthbook implements LoggerAwareInterface
     }
 
     /**
+     * @param string $url
      * @return $this
      */
     public function withUrl(string $url): self
@@ -299,13 +300,13 @@ class Growthbook implements LoggerAwareInterface
     /**
      * @return $this
      */
-    public function withLogger(LoggerInterface $logger = null): self
+    public function withLogger(?LoggerInterface $logger = null): self
     {
         $this->logger = $logger;
         return $this;
     }
 
-    public function setLogger(LoggerInterface $logger = null): void
+    public function setLogger(?LoggerInterface $logger = null): void
     {
         $this->logger = $logger;
     }
@@ -323,7 +324,7 @@ class Growthbook implements LoggerAwareInterface
     /**
      * @return $this
      */
-    public function withCache(CacheInterface $cache, int $ttl = null): self
+    public function withCache(CacheInterface $cache, ?int $ttl = null): self
     {
         $this->cache = $cache;
         if ($ttl !== null) {
@@ -525,7 +526,7 @@ class Growthbook implements LoggerAwareInterface
      * @param string|null $featureId
      * @return ExperimentResult<T>
      */
-    private function runExperiment(InlineExperiment $exp, string $featureId = null): ExperimentResult
+    private function runExperiment(InlineExperiment $exp, ?string $featureId = null): ExperimentResult
     {
         $this->log(LogLevel::DEBUG, "Attempting to run experiment - " . $exp->key);
 
@@ -733,10 +734,10 @@ class Growthbook implements LoggerAwareInterface
      */
     private function isIncludedInRollout(
         string $seed,
-        ?string $hashAttribute,
-        ?array $range,
-        ?float $coverage,
-        ?int $hashVersion
+        ?string $hashAttribute = null,
+        ?array $range = null,
+        ?float $coverage = null,
+        ?int $hashVersion = null
     ): bool {
         if ($coverage === null && $range === null) {
             return true;
@@ -829,7 +830,7 @@ class Growthbook implements LoggerAwareInterface
 
     /**
      * Helper to get an array of equal weights
-     *
+     * @param int $numVariations
      * @return float[]
      */
     public static function getEqualWeights(int $numVariations): array
