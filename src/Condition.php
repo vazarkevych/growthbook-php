@@ -20,6 +20,9 @@ class Condition
         if (isset($condition['$and'])) {
             return static::evalAnd($attributes, $condition['$and']);
         }
+        if (isset($condition['$not'])) {
+            return !static::evalCondition($attributes, $condition['$not']);
+        }
 
         foreach ($condition as $key=>$value) {
             if (!static::evalConditionValue($value, static::getPath($attributes, $key))) {
@@ -214,6 +217,18 @@ class Condition
                 return $attributeValue > $conditionValue;
             case '$gte':
                 return $attributeValue >= $conditionValue;
+            case '$veq':
+                return static::parseVersionString($attributeValue) === static::parseVersionString($conditionValue);
+            case '$vne':
+                return static::parseVersionString($attributeValue) !== static::parseVersionString($conditionValue);
+            case '$vgt':
+                return static::parseVersionString($attributeValue) > static::parseVersionString($conditionValue);
+            case '$vgte':
+                return static::parseVersionString($attributeValue) >= static::parseVersionString($conditionValue);
+            case '$vlt':
+                return static::parseVersionString($attributeValue) < static::parseVersionString($conditionValue);
+            case '$vlte':
+                return static::parseVersionString($attributeValue) <= static::parseVersionString($conditionValue);
             case '$regex':
                 $pattern = $conditionValue;
                 if (!static::isValidRegex($pattern)) {
@@ -229,12 +244,18 @@ class Condition
                 if (!is_array($conditionValue)) {
                     return false;
                 }
-                return in_array($attributeValue, $conditionValue);
+                if (!is_array($attributeValue)) {
+                    $attributeValue = [$attributeValue];
+                }
+                return array_intersect($attributeValue, $conditionValue) !== [];
             case '$nin':
                 if (!is_array($conditionValue)) {
                     return false;
                 }
-                return !in_array($attributeValue, $conditionValue);
+                if (!is_array($attributeValue)) {
+                    $attributeValue = [$attributeValue];
+                }
+                return array_intersect($attributeValue, $conditionValue) === [];
             case '$elemMatch':
                 return static::elemMatch($conditionValue, $attributeValue);
             case '$size':
@@ -281,5 +302,32 @@ class Condition
             default:
                 return false;
         }
+    }
+
+    public static function parseVersionString(string $version): string
+    {
+        // Remove build info and leading `v` if any
+        // Split version into parts (both core version numbers and pre-release tags)
+        // "v1.2.3-rc.1+build123" -> ["1","2","3","rc","1"]
+        $parts = preg_split('/[-.]/', preg_replace('/(^v|\+.*$)/', '', $version) ?? '');
+
+        // Unable to parse
+        if (!is_array($parts)) {
+            return $version;
+        }
+
+        // If it's SemVer without a pre-release, add `~` to the end
+        // ["1","0","0"] -> ["1","0","0","~"]
+        // "~" is the largest ASCII character, so this will make "1.0.0" greater than "1.0.0-beta" for example
+        if (count($parts) === 3) {
+            $parts[] = '~';
+        }
+
+        # Left pad each numeric part with spaces so string comparisons will work ("9">"10", but " 9"<"10")
+        $parts = array_map(function ($part) {
+            return preg_match('/^[0-9]+$/', $part) ? str_pad($part, 5, " ", STR_PAD_LEFT) : $part;
+        }, $parts);
+
+        return implode('-', $parts);
     }
 }

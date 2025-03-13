@@ -44,6 +44,9 @@ final class GrowthbookTest extends TestCase
             throw new Exception("Unknown test case: $section");
         }
         $raw = $this->cases[$section];
+        if (!$this->arrayIsList($raw)) {
+            return $raw;
+        }
 
         $arr = [];
         foreach ($raw as $row) {
@@ -87,7 +90,7 @@ final class GrowthbookTest extends TestCase
     /**
      * @dataProvider hashProvider
      */
-    public function testHash(string $seed, string $value, int $version, float $expected = null): void
+    public function testHash(string $seed, string $value, int $version, ?float $expected = null): void
     {
         $actual = Growthbook::hash($seed, $value, $version);
         $this->assertSame($actual, $expected);
@@ -117,7 +120,25 @@ final class GrowthbookTest extends TestCase
      */
     public function evalConditionProvider(): array
     {
-        return $this->getCases("evalCondition");
+        $versionCompare = $this->getCases("versionCompare");
+        $versionCases = [];
+        foreach ($versionCompare as $comparison => $testCases) {
+            foreach ($testCases as $case) {
+                $versionCases["versionCompare: " . $case[0] . ' ' . $comparison . ' ' . $case[1]] = [
+                    [
+                        'v' => [
+                            '$v' . $comparison => $case[1]
+                        ]
+                    ],
+                    [
+                        'v' => $case[0]
+                    ],
+                    $case[2]
+                ];
+            }
+        }
+
+        return array_merge($this->getCases("evalCondition"), $versionCases);
     }
 
 
@@ -210,7 +231,7 @@ final class GrowthbookTest extends TestCase
      * @param string $key
      * @param string|null $expected
      */
-    public function testDecrypt(string $encryptedString, string $key, string $expected = null): void
+    public function testDecrypt(string $encryptedString, string $key, ?string $expected = null): void
     {
         $gb = new Growthbook([
             'decryptionKey' => $key
@@ -1176,5 +1197,17 @@ final class GrowthbookTest extends TestCase
         $gb->loadFeatures($clientKey, $apiHost, '', ['async' => false]);
 
         $this->assertEmpty($gb->getFeatures());
+    }
+
+    /**
+     * Returns true if the array is JSON array instead of object
+     * @param array<int,mixed> $arr
+     */
+    protected function arrayIsList(array $arr): bool
+    {
+        if ($arr === []) {
+            return true;
+        }
+        return array_keys($arr) === range(0, count($arr) - 1);
     }
 }
