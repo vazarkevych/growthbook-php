@@ -267,6 +267,12 @@ class Condition
                 return static::parseVersionString($attributeValue) <= static::parseVersionString($conditionValue);
             case '$regex':
                 return @preg_match('/' . $conditionValue . '/', $attributeValue ?? '') === 1;
+            case '$regexi':
+                return @preg_match('/' . $conditionValue . '/i', $attributeValue ?? '') === 1;
+            case '$notRegex':
+                return @preg_match('/' . $conditionValue . '/', $attributeValue ?? '') !== 1;
+            case '$notRegexi':
+                return @preg_match('/' . $conditionValue . '/i', $attributeValue ?? '') !== 1;
             case '$in':
                 if (!is_array($conditionValue)) {
                     return false;
